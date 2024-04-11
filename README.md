@@ -1,3 +1,10 @@
+![NPM Version](https://img.shields.io/npm/v/%40sie-js%2Fserial)
+
+# Installation
+```
+npm i @sie-js/serial
+```
+
 # BFC
 ```js
 import fs from 'fs';
