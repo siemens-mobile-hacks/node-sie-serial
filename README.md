@@ -1,4 +1,4 @@
-![NPM Version](https://img.shields.io/npm/v/%40sie-js%2Fserial)
+[![NPM Version](https://img.shields.io/npm/v/%40sie-js%2Fserial)](https://www.npmjs.com/package/@sie-js/serial)
 
 # Summary
 
