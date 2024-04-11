@@ -1,11 +1,19 @@
 ![NPM Version](https://img.shields.io/npm/v/%40sie-js%2Fserial)
 
-# Installation
-```
+# Summary
+
+Various serial protocols which are used in the Siemens Mobile Phones.
+
+Install this package with npm:
+
+```shell
 npm i @sie-js/serial
 ```
 
 # BFC
+
+Protocol for service operations with the phone.
+
 ```js
 import fs from 'fs';
 import { SerialPort } from 'serialport';
@@ -50,6 +58,9 @@ await bus.disconnect();
 ```
 
 # AtChannel
+
+Working with classic AT commands.
+
 ```js
 import { SerialPort } from 'serialport';
 import { AtChannel } from '@sie-js/serial';
