@@ -19,12 +19,10 @@ import fs from 'fs';
 import { SerialPort } from 'serialport';
 import { BFC } from '@sie-js/serial';
 
-let bus = new BFC(port);
-bus.setVerbose(true);
-await bus.connect();
-await bus.setSpeed(921600);
-
-let bfc = bus.openChannel();
+let bfc = new BFC(port);
+bfc.setVerbose(true);
+await bfc.connect();
+await bfc.setBestSpeed();
 
 let displaysCnt = await bfc.getDisplayCount();
 console.log(`Total displays: ${displaysCnt}`);
@@ -33,11 +31,11 @@ for (let i = 1; i <= displaysCnt; i++) {
   let displaysInfo = await bfc.getDisplayInfo(i);
   let displaysBuffer = await bfc.getDisplayBufferInfo(displaysInfo.clientId);
   console.log(displaysBuffer);
-  
+
   console.time("read");
-  
+
   let memory = Buffer.alloc(0);
-  
+
   let bytesToRead = displaysBuffer.width * displaysBuffer.height * 2;
   let bufferCursor = displaysBuffer.addr;
   while (bytesToRead > 0) {
@@ -46,9 +44,9 @@ for (let i = 1; i <= displaysCnt; i++) {
     bytesToRead -= chunk.length;
     bufferCursor += chunk.length;
   }
-  
+
   fs.writeFileSync("/tmp/screen.bin", memory);
-  
+
   console.timeEnd("read");
 }
 
