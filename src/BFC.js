@@ -299,6 +299,9 @@ export class BFC {
 	async setBestBaudrate() {
 		let prevBaudRate = this.port.baudRate;
 
+		if (prevBaudRate > 115200)
+			return true;
+
 		let foundBestBaudrate;
 		for (let baudrate of SERIAL_BAUDRATES.reverse()) {
 			debug(`Probing new baudrate: ${baudrate}`);
@@ -375,6 +378,45 @@ export class BFC {
 			addr:		response.readUInt32LE(10),
 			type:		response.readUInt8(14),
 		};
+	}
+
+	async getDisplayBuffer(displayId, options = {}) {
+		options = {
+			onProgress: null,
+			...options
+		};
+
+		let displayInfo = await this.getDisplayInfo(displayId);
+		let displayBufferInfo = await this.getDisplayBufferInfo(displayInfo.clientId);
+
+		let modes = {
+			4:		'rgb565',
+			5:		'rgb888',
+			9:		'rgb8888',
+		};
+
+		let mode2bpp = {
+			'rgb565':	2,
+			'rgb888':	3,
+			'rgb8888':	4,
+		};
+
+		let rgbMode = modes[displayBufferInfo.type];
+		if (!rgbMode)
+			throw new Error(`Unknown display buffer type=${displayBufferInfo.type}`);
+
+		let start = Date.now();
+		let cursor = 0;
+		let buffer = Buffer.alloc(mode2bpp[rgbMode] * displayInfo.width * displayInfo.height);
+		while (cursor < buffer.length) {
+			options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
+			let chunkSize = Math.min(buffer.length - cursor, 63 * 256);
+			await this.readMemory(displayBufferInfo.addr + cursor, chunkSize, buffer, cursor);
+			cursor += chunkSize;
+		}
+		options.onProgress && options.onProgress(buffer.length, buffer.length, Date.now() - start);
+
+		return { mode: rgbMode, width: displayInfo.width, height: displayInfo.height, data: buffer };
 	}
 
 	async sendAT(cmd, timeout) {
