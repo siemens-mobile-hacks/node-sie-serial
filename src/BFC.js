@@ -423,7 +423,6 @@ export class BFC {
 		let tmp_buffer = "";
 		let parser = (frame, resolve) => {
 			tmp_buffer += frame.data.toString();
-			console.log('tmp_buffer', JSON.stringify(tmp_buffer));
 			if (tmp_buffer.match(/\r\n(OK|ERROR|\+CMS ERROR|\+CME ERROR)[^\r\n]*\r\n$/s))
 				resolve(tmp_buffer);
 		};

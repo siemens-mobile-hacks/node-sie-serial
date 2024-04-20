@@ -1,14 +1,18 @@
+import createDebug from 'debug';
+
+let debug = createDebug('atc');
+
 export class AtChannel {
+	port;
+	serialDataCallback;
+	buffer;
+	unsolHandlers;
+
 	constructor(port) {
 		this.port = port;
 		this.serialDataCallback = (data) => this._handleSerialData(data);
 		this.buffer = "";
-		this.verbose = false;
 		this.unsolHandlers = [];
-	}
-
-	setVerbose(flag) {
-		this.verbose = flag;
 	}
 
 	_isErrorResponse(line, dial) {
@@ -51,8 +55,7 @@ export class AtChannel {
 	}
 
 	_handleUnsolicitedLine(line) {
-		if (this.verbose)
-			console.log(`AT -- ${line}`);
+		debug(`AT -- ${line}`);
 
 		for (let h of this.unsolHandlers) {
 			if (line.startsWidth(h.prefix))
@@ -190,8 +193,7 @@ export class AtChannel {
 		});
 		this.currentCommand.promise = promise;
 
-		if (this.verbose)
-			console.log(`AT >> ${cmd}`);
+		debug(`AT >> ${cmd}`);
 
 		try {
 			await serialPortAsyncWrite(this.port, `${cmd}\r`);
@@ -201,14 +203,12 @@ export class AtChannel {
 		}
 
 		let response = await promise;
-		if (this.verbose) {
-			if (type != "NO_PREFIX_ALL") {
-				for (let line of response.lines)
-					console.log(`AT << ${line}`);
-			}
+		if (type != "NO_PREFIX_ALL") {
+			for (let line of response.lines)
+				debug(`AT << ${line}`);
 
 			if (response.status.length > 0)
-				console.log(`AT << ${response.status}`);
+				debug(`AT << ${response.status}`);
 		}
 
 		return response;
