@@ -403,7 +403,7 @@ export class BFC {
 		let displayBufferInfo = await this.getDisplayBufferInfo(displayInfo.clientId);
 
 		let modes = {
-			3:		'rgb332',
+			3:		'rgb565',
 			4:		'rgb565',
 			5:		'rgb888',
 			9:		'rgb8888',
