@@ -31,14 +31,14 @@ export class BFC {
 	authCache = {};
 	frameReceivers = {};
 
-	constructor(port) {
+	constructor(port = null) {
 		this.port = port;
 		this.serialDataCallback = (data) => this._handleSerialData(data);
 		this.buffer = Buffer.alloc(0);
 		this.atc = new AtChannel(port);
 	}
 
-	async _findOpenedBfcSpeed() {
+	async _findOpenedBfc() {
 		this._resume();
 		for (let baudRate of SERIAL_BAUDRATES) {
 			debug(`Probing BFC at baudrate: ${baudRate}`);
@@ -98,7 +98,7 @@ export class BFC {
 			return true;
 
 		if (allowNextTry) {
-			if (await this._findOpenedBfcSpeed())
+			if (await this._findOpenedBfc())
 				return true;
 		}
 
@@ -110,7 +110,7 @@ export class BFC {
 	async disconnect() {
 		if (!this.paused) {
 			if (await this.ping()) {
-				await this.sendAT("AT^SQWE=2\r", 250);
+				try { await this.sendAT("AT^SQWE=2\r", 250); } catch (e) { }
 				await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
 				await new Promise((resolve) => setTimeout(resolve, 300));
 			}
@@ -118,6 +118,19 @@ export class BFC {
 			return await this.atc.handshake();
 		}
 		return true;
+	}
+
+	destroy() {
+		if (!this.paused)
+			throw new Error(`Can't destroy when BFC in use!`);
+
+		if (this.atc) {
+			this.atc.stop();
+			this.atc.destroy();
+			this.atc = null;
+		}
+
+		this.port = null;
 	}
 
 	_resume() {
@@ -235,7 +248,7 @@ export class BFC {
 			...options || {}
 		};
 
-		options.timeout ||= 60000;
+		options.timeout ||= 5000;
 
 		if (options.auth && !this.authCache[dst])
 			this.authCache[dst] = await this.sendAuth(src, dst, options.timeout);
@@ -303,7 +316,7 @@ export class BFC {
 			return true;
 
 		let foundBestBaudrate;
-		for (let baudrate of SERIAL_BAUDRATES.reverse()) {
+		for (let baudrate of [...SERIAL_BAUDRATES].reverse()) {
 			debug(`Probing new baudrate: ${baudrate}`);
 			if (await this.setPhoneBaudrate(baudrate)) {
 				foundBestBaudrate = baudrate;

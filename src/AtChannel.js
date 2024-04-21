@@ -7,8 +7,9 @@ export class AtChannel {
 	serialDataCallback;
 	buffer;
 	unsolHandlers;
+	paused = true;
 
-	constructor(port) {
+	constructor(port = null) {
 		this.port = port;
 		this.serialDataCallback = (data) => this._handleSerialData(data);
 		this.buffer = "";
@@ -150,15 +151,21 @@ export class AtChannel {
 	}
 
 	start() {
+		this.paused = false;
 		this.port.on('data', this.serialDataCallback);
 	}
 
 	stop() {
+		this.paused = true;
 		this.port.off('data', this.serialDataCallback);
 		this.buffer = "";
 
 		if (this.currentCommand)
 			this._resolveCurrentCommand(false, "TIMEOUT");
+	}
+
+	destroy() {
+		this.port = null;
 	}
 
 	async checkCommandExists(cmd, timeout) {
