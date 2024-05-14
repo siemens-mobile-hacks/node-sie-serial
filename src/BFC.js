@@ -424,7 +424,7 @@ export class BFC {
 
 		let start = Date.now();
 		let cursor = 0;
-		let buffer = Buffer.alloc(mode2bpp[rgbMode] * displayInfo.width * displayInfo.height);
+		let buffer = Buffer.alloc(mode2bpp[rgbMode] * displayBufferInfo.width * displayBufferInfo.height);
 		while (cursor < buffer.length) {
 			options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
 			let chunkSize = Math.min(buffer.length - cursor, 63 * 256);
@@ -433,7 +433,7 @@ export class BFC {
 		}
 		options.onProgress && options.onProgress(buffer.length, buffer.length, Date.now() - start);
 
-		return { mode: rgbMode, width: displayInfo.width, height: displayInfo.height, data: buffer };
+		return { mode: rgbMode, width: displayBufferInfo.width, height: displayBufferInfo.height, data: buffer };
 	}
 
 	async sendAT(cmd, timeout) {
