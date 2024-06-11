@@ -17,5 +17,8 @@
 	},
 	"repository": {
 		"url": "git+https://github.com/siemens-mobile-hacks/node-sie-serial.git"
+	},
+	"exports": {
+		".": "./src/index.js"
 	}
 }

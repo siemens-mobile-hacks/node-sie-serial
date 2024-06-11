@@ -2,8 +2,9 @@ import createDebug from 'debug';
 import { crc16 } from './crc16.js';
 import { AtChannel } from './AtChannel.js';
 import { sprintf } from 'sprintf-js';
+import { serialPortAsyncUpdate, serialPortAsyncWrite } from './utils.js';
 
-let debug = createDebug('bfc');
+const debug = createDebug('bfc');
 
 export const DEFAULT_CHANNEL_ID = 0x01;
 
@@ -17,6 +18,28 @@ export const BFC_FRAME_TYPES = {
 	MULTIPLE:	1,
 	ACK:		2,
 	STATUS:		4,
+};
+
+export const BFC_HWI = {
+	RFChipSet:			1,
+	HwDetection:		2,
+	SWPlatform:			3,
+	PAType:				4,
+	LEDType:			5,
+	LayoutType:			6,
+	BandType:			7,
+	StepUpType:			8,
+	BluetoothType:		9,
+};
+
+export const BFC_SWI = {
+	DB_Name:					1,
+	Baseline_Version:			2,
+	Baseline_Release:			3,
+	Project_Name:				4,
+	SW_Builder:					5,
+	Link_Time_Stamp:			6,
+	Reconfigure_Time_Stamp:		7,
 };
 
 // All possible baudrates for BFC
@@ -110,7 +133,7 @@ export class BFC {
 	async disconnect() {
 		if (!this.paused) {
 			if (await this.ping()) {
-				try { await this.sendAT("AT^SQWE=2\r", 250); } catch (e) { }
+				try { await this.sendAT("AT^SQWE = 0\r", 250); } catch (e) { }
 				await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
 				await new Promise((resolve) => setTimeout(resolve, 300));
 			}
@@ -345,8 +368,6 @@ export class BFC {
 			debug(`Failed to set new baudrate.`);
 			throw new Error(`BFC baudrate ${baudrate} rejected by phone.`);
 		}
-
-		return true;
 	}
 
 	async ping(timeout = 10000) {
@@ -364,6 +385,96 @@ export class BFC {
 		return true;
 	}
 
+	async getBaseband() {
+		const KNOWN_CPUS = {
+			0x0101:	["pmb2850", "EGoldV1.2"],
+			0x0301:	["pmb2850", "EGold+V1.2"],
+			0x0300:	["pmb2850", "EGold+V1.3_M37"],
+			0x0200:	["pmb2850", "EGold+V1.3_b"],
+			0x0311:	["pmb6850", "EGold+V2.0"],
+			0x0312:	["pmb6850", "EGold+V2.1"],
+			0x0411:	["pmb7850", "EGold+V3.1"],
+			0x0412:	["pmb7850", "EGold+V3.1_R12"],
+			0x0414:	["pmb7850", "EGold+V3.1_R18"],
+			0x0415:	["pmb7850", "EGold+V3.1_R19"],
+			0x0413:	["pmb7850", "EGold+V3.1_R17"],
+			0x1A00:	["pmb8875", "SGold Lite V1.0"],
+			0x1A01:	["pmb8875", "SGold Lite V1.1"],
+			0x1A03:	["pmb8875", "SGold Lite V1.1a"],
+			0x1A05:	["pmb8875", "SGold Lite V1.1b"],
+			0x1B00:	["pmb8876", "SGold2 V1.0"],
+			0x1B10:	["pmb8876", "SGold2 V2.1"],
+			0x1B11:	["pmb8876", "SGold2 V2.1b"],
+		};
+		const UNKNOWN_CPUS = {
+			0x1A00:	["pmb8875", "SGold Lite Vx.x"],
+			0x1B00:	["pmb8876", "SGold2 Vx.x"],
+		};
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x03]);
+		let cpuId = Number(BigInt(response[2]) | (BigInt(response[1]) << 8n) | (BigInt(response[4]) << 16n) | (BigInt(response[3]) << 24n));
+		return KNOWN_CPUS[cpuId] || UNKNOWN_CPUS[cpuId & 0xFF00];
+	}
+
+	async getHwInfo(hwi) {
+		let hwi2key = {
+			[BFC_HWI.RFChipSet]:		0,
+			[BFC_HWI.HwDetection]:		4,
+			[BFC_HWI.SWPlatform]:		8,
+			[BFC_HWI.PAType]:			1,
+			[BFC_HWI.LEDType]:			2,
+			[BFC_HWI.LayoutType]:		3,
+			[BFC_HWI.BandType]:			5,
+			[BFC_HWI.StepUpType]:		6,
+			[BFC_HWI.BluetoothType]:	7,
+		};
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x02, hwi2key[hwi]]);
+		return response[1];
+	}
+
+	async getSwInfo(swi) {
+		let swi2key = {
+			[BFC_SWI.DB_Name]:					0,
+			[BFC_SWI.Baseline_Version]:			1,
+			[BFC_SWI.Baseline_Release]:			2,
+			[BFC_SWI.Project_Name]:				3,
+			[BFC_SWI.SW_Builder]:				4,
+			[BFC_SWI.Link_Time_Stamp]:			5,
+			[BFC_SWI.Reconfigure_Time_Stamp]:	6,
+		};
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x06, swi2key[swi]]);
+		return decodeCString(response.slice(1));
+	}
+
+	async getIMEI() {
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x05]);
+		return decodeCString(response.slice(1));
+	}
+
+	async getSwVersion() {
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x0B]);
+		return decodeCString(response.slice(1));
+	}
+
+	async getLanguageGroup() {
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x0E]);
+		return decodeCString(response.slice(1));
+	}
+
+	async getTegicGroup() {
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x0F]);
+		return decodeCString(response.slice(1));
+	}
+
+	async getVendorName() {
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x0C]);
+		return decodeCString(response.slice(1));
+	}
+
+	async getProductName() {
+		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x11, [0x0D]);
+		return decodeCString(response.slice(1));
+	}
+
 	async getDisplayCount() {
 		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x0A, [0x06]);
 		return response[1];
@@ -372,7 +483,6 @@ export class BFC {
 	async getDisplayInfo(displayId) {
 		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x0A, [0x07, displayId]);
 		return {
-			subcmd:		response.readUInt8(0),
 			width:		response.readUInt16LE(1),
 			height:		response.readUInt16LE(3),
 			clientId:	response.readUInt8(5),
@@ -382,7 +492,6 @@ export class BFC {
 	async getDisplayBufferInfo(clientId) {
 		let response = await this.exec(DEFAULT_CHANNEL_ID, 0x0A, [0x09, clientId]);
 		return {
-			subcmd:		response.readUInt8(0),
 			clientId:	response.readUInt8(1),
 			width:		response.readUInt16LE(2),
 			height:		response.readUInt16LE(4),
@@ -422,17 +531,9 @@ export class BFC {
 		if (!rgbMode)
 			throw new Error(`Unknown display buffer type=${displayBufferInfo.type}`);
 
-		let start = Date.now();
-		let cursor = 0;
-		let buffer = Buffer.alloc(mode2bpp[rgbMode] * displayBufferInfo.width * displayBufferInfo.height);
-		while (cursor < buffer.length) {
-			options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
-			let chunkSize = Math.min(buffer.length - cursor, 63 * 256);
-			await this.readMemory(displayBufferInfo.addr + cursor, chunkSize, buffer, cursor);
-			cursor += chunkSize;
-		}
-		options.onProgress && options.onProgress(buffer.length, buffer.length, Date.now() - start);
-
+		let buffer = await this.readMemory(displayBufferInfo.addr, mode2bpp[rgbMode] * displayBufferInfo.width * displayBufferInfo.height, {
+			onProgress: options.onProgress
+		});
 		return { mode: rgbMode, width: displayBufferInfo.width, height: displayBufferInfo.height, data: buffer };
 	}
 
@@ -446,7 +547,25 @@ export class BFC {
 		return await this.exec(DEFAULT_CHANNEL_ID, 0x17, cmd, { parser, timeout });
 	}
 
-	async readMemory(address, length, buffer, bufferOffset = 0) {
+	async readMemory(address, length, options = {}) {
+		options = {
+			onProgress: null,
+			...options
+		};
+		let start = Date.now();
+		let cursor = 0;
+		let buffer = Buffer.alloc(length);
+		while (cursor < buffer.length) {
+			options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
+			let chunkSize = Math.min(buffer.length - cursor, 63 * 256);
+			await this.readMemoryChunk(address + cursor, chunkSize, buffer, cursor);
+			cursor += chunkSize;
+		}
+		options.onProgress && options.onProgress(buffer.length, buffer.length, Date.now() - start);
+		return buffer;
+	}
+
+	async readMemoryChunk(address, length, buffer, bufferOffset = 0) {
 		let cmd = Buffer.alloc(9);
 		cmd.writeUInt8(0x01, 0);
 		cmd.writeUInt32LE(address, 1);
@@ -463,8 +582,8 @@ export class BFC {
 
 		let parser = (frame, resolve) => {
 			if (frameId == 0) {
-				let ack = frame.data.readUInt16BE(0);
-				if (ack != 0x100)
+				let ack = frame.data.readUInt16LE(0);
+				if (ack != 1)
 					resolve(new Error(`readMemory(): invalid ACK (0x${ack.toString(16)})`));
 			} else if (frame.type == BFC_FRAME_TYPES.SIGNLE) {
 				buffer.set(frame.data, bufferOffset + offset);
@@ -483,31 +602,6 @@ export class BFC {
 		};
 		return await this.exec(DEFAULT_CHANNEL_ID, 0x06, cmd, { parser });
 	}
-}
-
-async function serialPortAsyncWrite(port, data) {
-	return new Promise((resolve, reject) => {
-		port.write(data);
-		port.drain((err) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(true);
-			}
-		});
-	});
-}
-
-async function serialPortAsyncUpdate(port, settings) {
-	return new Promise((resolve, reject) => {
-		port.update(settings, (err) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(true);
-			}
-		});
-	});
 }
 
 function findPacketStartInBuffer(buffer) {
@@ -533,4 +627,14 @@ function calcTotalPacketSize(pkt) {
 	if ((pkt[4] & BFC_FRAME_FLAGS.CRC))
 		len += 2;
 	return len;
+}
+
+function decodeCString(buffer) {
+	let len = 0;
+	for (let i = 1; i < buffer.length; i++) {
+		if (buffer[i] == 0)
+			break;
+		len++;
+	}
+	return buffer.slice(0, len + 1).toString();
 }

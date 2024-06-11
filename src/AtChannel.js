@@ -1,4 +1,5 @@
 import createDebug from 'debug';
+import { serialPortAsyncWrite } from './utils.js';
 
 let debug = createDebug('atc');
 
@@ -41,6 +42,19 @@ export class AtChannel {
 	}
 
 	_handleSerialData(data) {
+		let cmd = this.currentCommand;
+		if (cmd && cmd.type == "BINARY") {
+			let chunkSize = Math.min(data.length, cmd.buffer.length - cmd.binaryOffset);
+			data.copy(cmd.buffer, cmd.binaryOffset, 0, chunkSize);
+			cmd.binaryOffset += chunkSize;
+			data = data.slice(chunkSize);
+
+			if (!data.length)
+				return;
+
+			cmd.type = "NO_RESPONSE";
+		}
+
 		this.buffer += data.toString();
 
 		let newLineIndex;
@@ -141,27 +155,32 @@ export class AtChannel {
 				success,
 				status,
 				lines: cmd.lines,
+				binary: cmd.buffer?.slice(2),
 			});
 		}
 		this.currentCommand = false;
 	}
 
-	addUnsolicitedHandler(preifx, callback) {
+	addUnsolicitedHandler(prefix, callback) {
 		this.unsolHandlers.push({ prefix: `${prefix}:`, callback });
 	}
 
 	start() {
-		this.paused = false;
-		this.port.on('data', this.serialDataCallback);
+		if (this.paused) {
+			this.paused = false;
+			this.port.on('data', this.serialDataCallback);
+		}
 	}
 
 	stop() {
-		this.paused = true;
-		this.port.off('data', this.serialDataCallback);
-		this.buffer = "";
+		if (!this.paused) {
+			this.paused = true;
+			this.port.off('data', this.serialDataCallback);
+			this.buffer = "";
 
-		if (this.currentCommand)
-			this._resolveCurrentCommand(false, "TIMEOUT");
+			if (this.currentCommand)
+				this._resolveCurrentCommand(false, "TIMEOUT");
+		}
 	}
 
 	destroy() {
@@ -175,23 +194,30 @@ export class AtChannel {
 		return false;
 	}
 
-	async sendRawCommand(type, cmd, prefix, cmdTimeout) {
+	async sendRawCommand(type, cmd, prefix, { timeout, binarySize }) {
 		if ((type == "DEFAULT" || type == "MULTILINE") && prefix == "")
 			type = "NO_RESPONSE";
 
-		cmdTimeout ||= 10 * 1000;
+		timeout ||= 10 * 1000;
 
 		while (this.currentCommand) {
 			await this.currentCommand.promise;
 		}
 
-		let timeout = setTimeout(() => this._resolveCurrentCommand(false, "TIMEOUT"), cmdTimeout);
+		let timeoutId = setTimeout(() => this._resolveCurrentCommand(false, "TIMEOUT"), timeout);
+		let buffer;
+
+		if (type == "BINARY") {
+			buffer = Buffer.alloc(binarySize + 2);
+		}
 
 		this.currentCommand = {
 			lines: [],
 			prefix,
 			type,
-			timeout
+			timeout: timeoutId,
+			buffer,
+			binaryOffset: 0
 		};
 
 		let promise = new Promise((resolve, reject) => {
@@ -221,36 +247,40 @@ export class AtChannel {
 		return response;
 	}
 
+	async sendCommandBinaryResponse(cmd, binarySize, timeout = 0) {
+		return this.sendRawCommand("BINARY", cmd, "", { timeout, binarySize });
+	}
+
 	async sendCommand(cmd, prefix = "", timeout = 0) {
-		return this.sendRawCommand("PREFIX", cmd, prefix, timeout);
+		return this.sendRawCommand("PREFIX", cmd, prefix, { timeout });
 	}
 
 	async sendCommandNoPrefix(cmd, timeout = 0) {
-		return this.sendRawCommand("NO_PREFIX", cmd, "", timeout);
+		return this.sendRawCommand("NO_PREFIX", cmd, "", { timeout });
 	}
 
 	async sendCommandNoPrefixAll(cmd, timeout = 0) {
-		return this.sendRawCommand("NO_PREFIX_ALL", cmd, "", timeout);
+		return this.sendRawCommand("NO_PREFIX_ALL", cmd, "", { timeout });
 	}
 
 	async sendCommandMultiline(cmd, prefix = "", timeout = 0) {
-		return this.sendRawCommand("MULTILINE", cmd, prefix, timeout);
+		return this.sendRawCommand("MULTILINE", cmd, prefix, { timeout });
 	}
 
 	async sendCommandNumeric(cmd, timeout = 0) {
-		return this.sendRawCommand("NUMERIC", cmd, "", timeout);
+		return this.sendRawCommand("NUMERIC", cmd, "", { timeout });
 	}
 
 	async sendCommandNumericOrWithPrefix(cmd, prefix = "", timeout = 0) {
-		return this.sendRawCommand("NUMERIC", cmd, prefix, timeout);
+		return this.sendRawCommand("NUMERIC", cmd, prefix, { timeout });
 	}
 
 	async sendCommandNoResponse(cmd, timeout = 0) {
-		return this.sendRawCommand("NO_RESPONSE", cmd, "", timeout);
+		return this.sendRawCommand("NO_RESPONSE", cmd, "", { timeout });
 	}
 
 	async sendCommandDial(cmd, timeout = 0) {
-		return this.sendRawCommand("DIAL", cmd, "", timeout);
+		return this.sendRawCommand("DIAL", cmd, "", { timeout });
 	}
 
 	async handshake(tries = 3) {
@@ -263,15 +293,3 @@ export class AtChannel {
 	}
 }
 
-async function serialPortAsyncWrite(port, data) {
-	return new Promise((resolve, reject) => {
-		port.write(data);
-		port.drain((err) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(true);
-			}
-		});
-	});
-}
