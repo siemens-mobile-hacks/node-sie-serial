@@ -13,6 +13,7 @@ export class AtChannel {
 	constructor(port = null) {
 		this.port = port;
 		this.serialDataCallback = (data) => this._handleSerialData(data);
+		this.serialCloseCallback = () => this._handleSerialClose();
 		this.buffer = "";
 		this.unsolHandlers = [];
 	}
@@ -39,6 +40,10 @@ export class AtChannel {
 		}
 
 		return false;
+	}
+
+	_handleSerialClose() {
+		this.stop();
 	}
 
 	_handleSerialData(data) {
@@ -169,6 +174,7 @@ export class AtChannel {
 		if (this.paused) {
 			this.paused = false;
 			this.port.on('data', this.serialDataCallback);
+			this.port.on('close', this.serialCloseCallback);
 		}
 	}
 
@@ -176,6 +182,7 @@ export class AtChannel {
 		if (!this.paused) {
 			this.paused = true;
 			this.port.off('data', this.serialDataCallback);
+			this.port.off('close', this.serialCloseCallback);
 			this.buffer = "";
 
 			if (this.currentCommand)
@@ -232,7 +239,7 @@ export class AtChannel {
 			await serialPortAsyncWrite(this.port, `${cmd}\r`);
 		} catch (e) {
 			console.error(`[AtChannel]`, e);
-			this._resolveCurrentCommand(false, "UNKNOWN");
+			this._resolveCurrentCommand(false, "PORT_CLOSED");
 		}
 
 		let response = await promise;

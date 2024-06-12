@@ -321,7 +321,8 @@ export class CGSN {
 	}
 
 	async disconnect() {
-		await this.setBaudrate(115200);
+		if (this.port?.isOpen)
+			await this.setBaudrate(115200);
 		this.atc.stop();
 	}
 

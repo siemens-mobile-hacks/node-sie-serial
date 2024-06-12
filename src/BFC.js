@@ -48,21 +48,70 @@ export const BFC_SWI = {
 // 921600 - USART NSG
 const SERIAL_BAUDRATES = [115200, 230400, 921600];
 
+const BFC_MODE = {
+	NONE:	0,
+	AT:		1,
+	BFC:	2,
+};
+
 export class BFC {
-	paused = true;
+	mode = BFC_MODE.NONE;
 	channels = {};
 	authCache = {};
 	frameReceivers = {};
+	connectionError = null;
 
 	constructor(port = null) {
 		this.port = port;
 		this.serialDataCallback = (data) => this._handleSerialData(data);
+		this.serialCloseCallback = () => this._handleSerialClose();
 		this.buffer = Buffer.alloc(0);
 		this.atc = new AtChannel(port);
 	}
 
+	_setConnectionError(err) {
+		if (err != null)
+			debug(`ERROR: ${err}`);
+		this.connectionError = err;
+	}
+
+	getConnectionError() {
+		return this.connectionError;
+	}
+
+	_setMode(mode) {
+		if (this.mode == mode)
+			return;
+		this.mode = mode;
+
+		switch (mode) {
+			case BFC_MODE.NONE:
+				debug(`Mode: NONE`);
+				this.port.off('data', this.serialDataCallback);
+				this.port.off('close', this.serialCloseCallback);
+				this.atc.stop();
+				this.buffer = Buffer.alloc(0);
+			break;
+
+			case BFC_MODE.AT:
+				debug(`Mode: AT`);
+				this.port.off('data', this.serialDataCallback);
+				this.port.off('close', this.serialCloseCallback);
+				this.atc.start();
+				this.buffer = Buffer.alloc(0);
+			break;
+
+			case BFC_MODE.BFC:
+				debug(`Mode: BFC`);
+				this.port.on('data', this.serialDataCallback);
+				this.port.on('close', this.serialCloseCallback);
+				this.atc.stop();
+			break;
+		}
+	}
+
 	async _findOpenedBfc() {
-		this._resume();
+		this._setMode(BFC_MODE.BFC);
 		for (let baudRate of SERIAL_BAUDRATES) {
 			debug(`Probing BFC at baudrate: ${baudRate}`);
 			await serialPortAsyncUpdate(this.port, { baudRate });
@@ -75,76 +124,84 @@ export class BFC {
 				return baudRate;
 			}
 		}
+		this._setMode(BFC_MODE.NONE);
 		return false;
 	}
 
 	async _trySwitchFromAtToBfc() {
-		let response;
+		await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
 
-		this._pause();
 		debug(`Probing AT handshake...`);
+		this._setMode(BFC_MODE.AT);
+
+		let response;
 		if (await this.atc.handshake()) {
 			// AT^SIFS - current interface USB, WIRE, BLUE, IRDA
-			response = await this.atc.sendCommand("AT^SIFS", "^SIFS", 3000);
+			response = await this.atc.sendCommand("AT^SIFS", "^SIFS", 750);
 			if (response.success && response.lines.length > 0 && response.lines[0].match(/BLUE/)) {
-				debug(`Bluetooth is not supported for BFC.`);
-				this._pause();
-				return [false, false];
+				this._setMode(BFC_MODE.NONE);
+				throw new Error(`Bluetooth is not supported for BFC.`);
 			}
 
 			debug(`Phone in AT mode, switching from AT to BFC...`);
 			response = await this.atc.sendCommandNumeric("AT^SQWE=1");
 			if (response.success) {
-				this._resume();
+				this._setMode(BFC_MODE.BFC);
 				await new Promise((resolve) => setTimeout(resolve, 300)); // Wait for BFC is ready
 				if (await this.ping()) {
 					debug(`Succesfully switched to BFC mode!`);
-					return [true, true];
+					return true;
 				} else {
-					debug(`Switching to BFC failed! (ping)`);
+					this._setMode(BFC_MODE.NONE);
+					throw new Error(`Switching to BFC failed! (ping)`);
 				}
 			} else {
-				debug(`Switching to BFC failed! (AT)`);
+				this._setMode(BFC_MODE.NONE);
+				throw new Error(`Switching to BFC failed! (AT^SQWE=1)`);
 			}
 		} else {
-			debug(`AT handshake failed, maybe phone in BFC mode.`);
+			debug(`AT handshake failed, maybe phone in BFC mode?`);
+			this._setMode(BFC_MODE.AT);
+			return false;
 		}
-		this._pause();
-		return [false, true];
 	}
 
 	async connect() {
-		await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
+		if (this.mode == BFC_MODE.BFC)
+			throw new Error(`BFC already connected.`);
 
-		let [success, allowNextTry] = await this._trySwitchFromAtToBfc();
-		if (success)
+		if (!this.port?.isOpen)
+			throw new Error(`Serial port closed.`);
+
+		if (await this._trySwitchFromAtToBfc())
 			return true;
 
-		if (allowNextTry) {
-			if (await this._findOpenedBfc())
-				return true;
-		}
+		if (await this._findOpenedBfc())
+			return true;
 
-		debug(`Phone is not connected.`);
-
-		return false;
+		throw new Error(`Phone not found.`);
 	}
 
 	async disconnect() {
-		if (!this.paused) {
+		if (this.mode != BFC_MODE.BFC)
+			return true;
+		if (this.mode == BFC_MODE.BFC && this.port?.isOpen) {
 			if (await this.ping()) {
-				try { await this.sendAT("AT^SQWE = 0\r", 250); } catch (e) { }
-				await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
-				await new Promise((resolve) => setTimeout(resolve, 300));
+				try {
+					await this.sendAT("AT^SQWE = 0\r", 250);
+					await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
+					await new Promise((resolve) => setTimeout(resolve, 300));
+				} catch (e) {
+					debug(`disconnect error: ${e.message}`);
+				}
 			}
-			this._pause();
-			return await this.atc.handshake();
 		}
+		this._handleSerialClose();
 		return true;
 	}
 
 	destroy() {
-		if (!this.paused)
+		if (this.mode != BFC_MODE.NONE)
 			throw new Error(`Can't destroy when BFC in use!`);
 
 		if (this.atc) {
@@ -156,17 +213,12 @@ export class BFC {
 		this.port = null;
 	}
 
-	_resume() {
-		this.paused = false;
-		this.port.on('data', this.serialDataCallback);
-		this.atc.stop();
-	}
-
-	_pause() {
-		this.paused = true;
-		this.port.off('data', this.serialDataCallback);
-		this.buffer = Buffer.alloc(0);
-		this.atc.start();
+	_handleSerialClose() {
+		for (let dst in this.frameReceivers) {
+			let receiver = this.frameReceivers;
+			this._handleReceiverResponse(receiver.src, dst, new Error(`BFC connection closed.`));
+		}
+		this._setMode(BFC_MODE.NONE);
 	}
 
 	_handleSerialData(data) {
@@ -175,12 +227,12 @@ export class BFC {
 		while (this.buffer.length >= 6) {
 			let pktStart = findPacketStartInBuffer(this.buffer);
 			if (pktStart === false) {
-				this.buffer = this.buffer.slice(this.buffer.length - 5); // trim noise
+				this.buffer = this.buffer.subarray(this.buffer.length - 5); // trim noise
 				continue;
 			}
 
 			if (pktStart > 0) { // trim noise
-				this.buffer = this.buffer.slice(pktStart);
+				this.buffer = this.buffer.subarray(pktStart);
 				pktStart = 0;
 			}
 
@@ -188,8 +240,8 @@ export class BFC {
 			if (this.buffer.length < pktLen)
 				break;
 
-			let pkt = this.buffer.slice(0, pktLen);
-			this.buffer = this.buffer.slice(pktLen);
+			let pkt = this.buffer.subarray(0, pktLen);
+			this.buffer = this.buffer.subarray(pktLen);
 
 			this._handleBfcPacket(pkt);
 		}
@@ -221,7 +273,11 @@ export class BFC {
 
 		if (receiver && receiver.parser) {
 			let frame = { src, dst, data: payload, type: frameType, flags: frameFlags };
-			receiver.parser(frame, (response) => this._handleReceiverResponse(src, dst, response));
+			try {
+				receiver.parser(frame, (response) => this._handleReceiverResponse(src, dst, response));
+			} catch (error) {
+				this._handleReceiverResponse(src, dst, error);
+			}
 		} else {
 			this._handleReceiverResponse(src, dst, payload);
 		}
@@ -232,7 +288,7 @@ export class BFC {
 			await this.frameReceivers[dst].promise;
 		}
 
-		let timeoutId = setTimeout(() => this._handleReceiverResponse(src, dst, new Error(`BFC command timeout.`)), timeout);
+		let timeoutId = setTimeout(() => this._handleReceiverResponse(src, dst, new Error(`BFC command ${src.toString(16)}:${dst.toString(16)} timeout.`)), timeout);
 
 		let promise = new Promise((resolve, reject) => {
 			this.frameReceivers[dst] = { src, dst, resolve, reject,  parser, timeoutId };
@@ -261,6 +317,9 @@ export class BFC {
 	}
 
 	async exec(src, dst, payload, options) {
+		if (this.mode != BFC_MODE.BFC)
+			throw new Error(`BFC is not connected.`);
+
 		options = {
 			type: BFC_FRAME_TYPES.SIGNLE,
 			crc: true,
@@ -303,6 +362,9 @@ export class BFC {
 	}
 
 	async sendFrame(src, dst, frameType, frameFlags, payload) {
+		if (this.mode != BFC_MODE.BFC)
+			throw new Error(`BFC is not connected.`);
+
 		if (!Buffer.isBuffer(payload))
 			payload = Buffer.from(payload);
 
@@ -329,10 +391,19 @@ export class BFC {
 		await serialPortAsyncWrite(this.port, pkt);
 	}
 
-	/*
-	 * BFC API
-	 * */
-	async setBestBaudrate() {
+	// ----------------------------------------------------------------------------------
+	// BFC API
+	// ----------------------------------------------------------------------------------
+
+	async ping(timeout = 10000) {
+		try {
+			return await this.sendAuth(DEFAULT_CHANNEL_ID, 0x02, timeout);
+		} catch (e) {
+			return false;
+		}
+	}
+
+	async setBestBaudrate(limitBaudrate = 0) {
 		let prevBaudRate = this.port.baudRate;
 
 		if (prevBaudRate > 115200)
@@ -340,11 +411,15 @@ export class BFC {
 
 		let foundBestBaudrate;
 		for (let baudrate of [...SERIAL_BAUDRATES].reverse()) {
+			if (limitBaudrate && baudrate > limitBaudrate)
+				continue;
 			debug(`Probing new baudrate: ${baudrate}`);
 			if (await this.setPhoneBaudrate(baudrate)) {
+				debug(`Approved by phone.`);
 				foundBestBaudrate = baudrate;
 				break;
 			}
+			debug(`Rejected by phone.`);
 		}
 
 		if (foundBestBaudrate) {
@@ -363,18 +438,11 @@ export class BFC {
 			await new Promise((resolve) => setTimeout(resolve, 100));
 
 			debug(`Failed to set new baudrate.`);
-			throw new Error(`BFC failed to set baudrate.`);
+			return false;
 		} else {
-			debug(`Failed to set new baudrate.`);
-			throw new Error(`BFC baudrate ${baudrate} rejected by phone.`);
+			debug(`No suitable baudrate found.`);
+			return false;
 		}
-	}
-
-	async ping(timeout = 10000) {
-		try {
-			return await this.sendAuth(DEFAULT_CHANNEL_ID, 0x02, timeout);
-		} catch (e) { }
-		return false;
 	}
 
 	async setPhoneBaudrate(baudrate) {
@@ -558,7 +626,17 @@ export class BFC {
 		while (cursor < buffer.length) {
 			options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
 			let chunkSize = Math.min(buffer.length - cursor, 63 * 256);
-			await this.readMemoryChunk(address + cursor, chunkSize, buffer, cursor);
+
+			for (let i = 0; i < 3; i++) {
+				try {
+					await this.readMemoryChunk(address + cursor, chunkSize, buffer, cursor);
+					break;
+				} catch (error) {
+					if (i == 2)
+						throw error;
+				}
+			}
+
 			cursor += chunkSize;
 		}
 		options.onProgress && options.onProgress(buffer.length, buffer.length, Date.now() - start);
@@ -592,7 +670,7 @@ export class BFC {
 				buffer.set(frame.data.slice(1), bufferOffset + offset);
 				offset += frame.data.length - 1;
 			} else {
-				throw new Error(`Unknown frame received: ${JSON.stringify(frame)}`);
+				resolve(new Error(`Unknown frame received: ${JSON.stringify(frame)}`));
 			}
 
 			if (offset == length)

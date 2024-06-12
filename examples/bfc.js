@@ -28,14 +28,11 @@ if (argv.help || argv.usage) {
 let port = await serialWaitForOpen(new SerialPort({ path: argv.values.port, baudRate: 115200 }));
 let bus = new BFC(port);
 
-console.log('Connecting...');
-if (await bus.connect()) {
-	console.log('Connected!');
-} else {
-	console.log('Phone not found...');
-	process.exit(1);
-}
+port.on('error', (err) => console.error('Port error', err));
+port.on('close', () => console.error('Port close'));
 
+console.log('Connecting...');
+await bus.connect();
 await bus.setBestBaudrate();
 
 console.log('BASEBAND', await bus.getBaseband());
