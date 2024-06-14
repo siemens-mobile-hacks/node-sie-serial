@@ -2,6 +2,7 @@ import fs from 'fs';
 import { CGSN, serialWaitForOpen } from "@sie-js/serial";
 import { SerialPort } from 'serialport';
 import { parseArgs } from 'node:util';
+import { sprintf } from 'sprintf-js';
 
 const { values: argv } = parseArgs({
 	options: {
@@ -17,6 +18,10 @@ const { values: argv } = parseArgs({
 		},
 		out: {
 			type: "string"
+		},
+		baudrate: {
+			type: "string",
+			default: "0"
 		},
 		help: {
 			type: "boolean",
@@ -39,6 +44,9 @@ if (badParams || argv.help || argv.usage) {
 let addr = parseInt(argv.addr, 16);
 let size = parseInt(argv.size, 16);
 
+console.log(sprintf("Addr: 0x%08X", addr));
+console.log(sprintf("Size: 0x%08X (%d Mb)", size, size / 1024 / 1024));
+
 if (isNaN(addr) || isNaN(size)) {
 	console.log(`Invalid address or size.`);
 	process.exit(1);
@@ -54,7 +62,7 @@ if (await cgsn.connect()) {
 	process.exit(1);
 }
 
-await cgsn.setBestBaudrate();
+await cgsn.setBestBaudrate(parseInt(argv.baudrate));
 
 let result = await cgsn.readMemory(addr, size, {
 	onProgress(cursor, total, elapsed) {
