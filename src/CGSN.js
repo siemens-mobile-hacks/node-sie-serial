@@ -147,7 +147,7 @@ export class CGSN {
 			limitBaudrate = 115200;
 		}
 
-		availableBaudrates = availableBaudrates.filter((v) => v <= limitBaudrate);
+		availableBaudrates = availableBaudrates.filter((v) => !limitBaudrate || v <= limitBaudrate);
 		if (!availableBaudrates.length) {
 			debug(`No appropriate baudrate found [limitBaudrate=${limitBaudrate}, availableBaudrates=${availableBaudrates}].`);
 			return false;
@@ -225,13 +225,20 @@ export class CGSN {
 			onProgress: null,
 			chunkSize: 512,
 			progressInterval: 500,
+			signal: false,
 			...options
 		};
 		let start = Date.now();
 		let cursor = 0;
 		let buffer = Buffer.alloc(length);
 		let lastProgressCalled = 0;
+		let canceled = false;
 		while (cursor < buffer.length) {
+			if (options.signal?.aborted) {
+				canceled = true;
+				break;
+			}
+
 			if (Date.now() - lastProgressCalled > options.progressInterval && cursor > 0) {
 				options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
 				lastProgressCalled = Date.now();
@@ -240,7 +247,7 @@ export class CGSN {
 			let chunkSize = Math.min(buffer.length - cursor, options.chunkSize);
 			let response;
 			for (let i = 0; i < 3; i++) {
-				response = await this.readMemoryChunk(address + cursor, chunkSize, buffer, cursor);;
+				response = await this.readMemoryChunk(address + cursor, chunkSize, buffer, cursor);
 				if (response.success)
 					break;
 			}
@@ -250,8 +257,9 @@ export class CGSN {
 
 			cursor += chunkSize;
 		}
-		options.onProgress && options.onProgress(buffer.length, buffer.length, Date.now() - start);
-		return { success: true, buffer };
+
+		options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
+		return { success: true, buffer, canceled, readed: cursor };
 	}
 
 	async writeMemory(address, buffer, options = {}) {
@@ -259,11 +267,13 @@ export class CGSN {
 			onProgress: null,
 			chunkSize: 128,
 			progressInterval: 500,
+			signal: false,
 			...options
 		};
 		let start = Date.now();
 		let cursor = 0;
 		let lastProgressCalled = 0;
+		let canceled = false;
 
 		if ((address % 4) != 0)
 			throw new Error(`Address (${address.toString(16)}) is not aligned to 4!`);
@@ -272,6 +282,11 @@ export class CGSN {
 			throw new Error(`Buffer size (${buffer.length}) is not aligned to 4!`);
 
 		while (cursor < buffer.length) {
+			if (options.signal?.aborted) {
+				canceled = true;
+				break;
+			}
+
 			if (Date.now() - lastProgressCalled > options.progressInterval && cursor > 0) {
 				options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
 				lastProgressCalled = Date.now();
@@ -290,8 +305,8 @@ export class CGSN {
 
 			cursor += chunkSize;
 		}
-		options.onProgress && options.onProgress(buffer.length, buffer.length, Date.now() - start);
-		return { success: true };
+		options.onProgress && options.onProgress(cursor, buffer.length, Date.now() - start);
+		return { success: true, written: cursor, canceled };
 	}
 
 	async readMemoryChunk(address, length, buffer, bufferOffset = 0) {
