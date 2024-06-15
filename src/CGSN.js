@@ -28,6 +28,7 @@ export class CGSN {
 	atc;
 	serialMode;
 	connectionType;
+	isConnected = false;
 
 	constructor(port = null) {
 		this.port = port;
@@ -35,17 +36,22 @@ export class CGSN {
 	}
 
 	async connect(testBaudrates = null) {
+		if (this.isConnected)
+			await this.disconnect();
+
 		this.atc.start();
 		testBaudrates ||= SERIAL_BAUDRATES;
 		for (let baudrate of testBaudrates) {
 			await serialPortAsyncUpdate(this.port, { baudRate: baudrate });
 			if (await this._tryHandshake(3)) {
+				this.isConnected = true;
 				if (!await this._checkCgsnPatch()) {
+					this.isConnected = false;
 					debug(`CGSN patch not found!`);
 					return false;
 				}
 
-				this.connectionType = await this.getCurrentConnectionType();
+				this.connectionType = await this._getCurrentConnectionType();
 				debug(`connectionType=${this.connectionType}`);
 
 				if (this.connectionType == 'BLUE') {
@@ -57,12 +63,15 @@ export class CGSN {
 				}
 
 				for (let i = 0; i < 3; i++) {
-					if (this.atc.handshake())
+					if (this.atc.handshake()) {
+						this.isConnected = true;
 						return true;
+					}
 				}
 
 				debug(`Phone is lost after mode swtiching...`);
 
+				this.isConnected = false;
 				return false;
 			}
 		}
@@ -87,7 +96,7 @@ export class CGSN {
 		}
 	}
 
-	async getCurrentSerialMode() {
+	async _getCurrentSerialMode() {
 		let response;
 		for (let i = 0; i < 3; i++) {
 			// AT^SQWE - current interface 2 - GIPSY, 0 - RCCP
@@ -100,7 +109,7 @@ export class CGSN {
 		return response.lines[0].replace(/^\^SQWE:/, '').trim();
 	}
 
-	async getCurrentConnectionType() {
+	async _getCurrentConnectionType() {
 		let response;
 		for (let i = 0; i < 3; i++) {
 			// AT^SIFS - current interface USB, WIRE, BLUE, IRDA
@@ -113,11 +122,22 @@ export class CGSN {
 		return response.lines[0].replace(/^\^SIFS:/, '').trim();
 	}
 
+	getAtChannel() {
+		return this.atc;
+	}
+
+	getPort() {
+		return this.port;
+	}
+
 	getBaudrate() {
 		return this.port.baudRate;
 	}
 
 	async getMaxBaudrate(limitBaudrate = 0) {
+		if (!this.isConnected)
+			return false;
+
 		if (this.connectionType == "USB" || this.connectionType == "BLUE") {
 			// Useless for USB or Bluetooth
 			return this.port.baudRate;
@@ -157,6 +177,9 @@ export class CGSN {
 	}
 
 	async setBaudrate(baudrate) {
+		if (!this.isConnected)
+			return false;
+
 		let prevBaudRate = this.port.baudRate;
 		if (prevBaudRate == baudrate)
 			return true;
@@ -194,6 +217,9 @@ export class CGSN {
 	}
 
 	async execute(address, regs = []) {
+		if (!this.isConnected)
+			return { success: false, error: 'Not connected!' };
+
 		let regNames = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'cpsr'];
 		let cmd = "AT+CGSN@" + [address, ...regs].map((v) => sprintf('%08X', v)).join(',');
 		let response = await this.atc.sendCommandBinaryResponse(cmd, 4 * regNames.length + 1, 5000);
@@ -208,6 +234,9 @@ export class CGSN {
 	}
 
 	async query(addresses) {
+		if (!this.isConnected)
+			return { success: false, error: 'Not connected!' };
+
 		let cmd = "AT+CGSN%" + addresses.map((v) => sprintf('%08X', v)).join('');
 		let response = await this.atc.sendCommandBinaryResponse(cmd, 4 * addresses.length + 1, 400);
 		if (!response.success)
@@ -310,6 +339,9 @@ export class CGSN {
 	}
 
 	async readMemoryChunk(address, length, buffer, bufferOffset = 0) {
+		if (!this.isConnected)
+			return { success: false, error: 'Not connected!' };
+
 		if (length > 512)
 			throw new Error(`Maximum length for one memory reading is 512 bytes.`);
 		let cmd = sprintf("AT+CGSN:%08X,%08X", address , length);
@@ -323,6 +355,9 @@ export class CGSN {
 	}
 
 	async writeMemoryChunk(address, length, buffer, bufferOffset = 0) {
+		if (!this.isConnected)
+			return { success: false, error: 'Not connected!' };
+
 		if (length > 128)
 			throw new Error(`Maximum length for one memory writing is 128 bytes.`);
 		let hex = buffer.subarray(bufferOffset, bufferOffset + length).toString('hex').toUpperCase();
@@ -336,9 +371,10 @@ export class CGSN {
 	}
 
 	async disconnect() {
-		if (this.port?.isOpen)
+		if (this.isConnected && this.port?.isOpen)
 			await this.setBaudrate(115200);
 		this.atc.stop();
+		this.isConnected = false;
 	}
 
 	destroy() {
