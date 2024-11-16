@@ -1,6 +1,7 @@
 import fs from 'fs';
-import { CGSN, portOpen } from "@sie-js/serial";
-import { SerialPort } from 'serialport';
+import { CGSN, AsyncSerialPort } from "@sie-js/serial";
+import { SerialPortStream } from '@serialport/stream';
+import { autoDetect as autoDetectSerialBinding } from "@sie-js/node-serialport-bindings-cpp";
 import { parseArgs } from 'node:util';
 import { sprintf } from 'sprintf-js';
 
@@ -52,7 +53,13 @@ if (isNaN(addr) || isNaN(size)) {
 	process.exit(1);
 }
 
-let port = await portOpen(new SerialPort({ path: argv.port, baudRate: 115200 }));
+let port = new AsyncSerialPort(new SerialPortStream({
+	path: argv.values.port,
+	baudRate: 115200,
+	autoOpen: false,
+	binding: autoDetectSerialBinding()
+}));
+await port.open();
 let cgsn = new CGSN(port);
 
 if (await cgsn.connect()) {

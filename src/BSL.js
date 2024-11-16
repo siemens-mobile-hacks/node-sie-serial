@@ -72,6 +72,9 @@ export async function loadBootCode(port, code, options = {}) {
 
 	let result = {
 		cpu: CPU_TYPES[cpuType],
+		get success() {
+			return this.status == BSL_ERRORS.SUCCESS
+		},
 		status: BSL_ERRORS.SUCCESS,
 		error: null
 	};

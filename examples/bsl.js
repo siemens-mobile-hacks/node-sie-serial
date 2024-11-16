@@ -1,7 +1,8 @@
 import { loadBootCode } from "@sie-js/serial";
 import { AsyncSerialPort } from "@sie-js/serial";
 import { parseArgs } from 'node:util';
-import { SerialPort } from 'serialport';
+import { SerialPortStream } from '@serialport/stream';
+import { autoDetect as autoDetectSerialBinding } from "@sie-js/node-serialport-bindings-cpp";
 
 const SPECIAL_BOOTS = {
 	BurninMode: Buffer.from(
@@ -72,7 +73,12 @@ if ((argv.values.boot in SPECIAL_BOOTS)) {
 	bootcode = fs.readFileSync(argv.values.boot);
 }
 
-let port = new AsyncSerialPort(new SerialPort({ path: argv.values.port, baudRate: 115200, autoOpen: false }));
+let port = new AsyncSerialPort(new SerialPortStream({
+	path: argv.values.port,
+	baudRate: 115200,
+	autoOpen: false,
+	binding: autoDetectSerialBinding()
+}));
 await port.open();
 
 let result = await loadBootCode(port, bootcode);

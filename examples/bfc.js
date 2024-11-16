@@ -1,5 +1,6 @@
 import { BFC, BFC_HWI, BFC_SWI, AsyncSerialPort } from "@sie-js/serial";
-import { SerialPort } from 'serialport';
+import { SerialPortStream } from '@serialport/stream';
+import { autoDetect as autoDetectSerialBinding } from "@sie-js/node-serialport-bindings-cpp";
 import { parseArgs } from 'node:util';
 
 const argv = parseArgs({
@@ -25,7 +26,12 @@ if (argv.help || argv.usage) {
 	process.exit(0);
 }
 
-let port = new AsyncSerialPort(new SerialPort({ path: argv.values.port, baudRate: 115200, autoOpen: false }));
+let port = new AsyncSerialPort(new SerialPortStream({
+	path: argv.values.port,
+	baudRate: 115200,
+	autoOpen: false,
+	binding: autoDetectSerialBinding()
+}));
 await port.open();
 let bus = new BFC(port);
 
