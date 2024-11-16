@@ -1,5 +1,5 @@
 import createDebug from 'debug';
-import { serialPortAsyncWrite } from './utils.js';
+import { AsyncSerialPort } from './AsyncSerialPort.js';
 
 let debug = createDebug('atc');
 
@@ -11,6 +11,9 @@ export class AtChannel {
 	paused = true;
 
 	constructor(port = null) {
+		if (!(port instanceof AsyncSerialPort))
+			throw new Error(`Port is not AsyncSerialPort!`);
+
 		this.port = port;
 		this.serialDataCallback = (data) => this._handleSerialData(data);
 		this.serialCloseCallback = () => this._handleSerialClose();
@@ -236,7 +239,7 @@ export class AtChannel {
 		debug(`AT >> ${cmd}`);
 
 		try {
-			await serialPortAsyncWrite(this.port, `${cmd}\r`);
+			await this.port.write(`${cmd}\r`);
 		} catch (e) {
 			console.error(`[AtChannel]`, e);
 			this._resolveCurrentCommand(false, "PORT_CLOSED");

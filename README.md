@@ -17,3 +17,4 @@ npm i @sie-js/serial
 | BFC      | [examples/bfc.js](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/bfc.js)   |
 | CGSN     | [examples/cgsn.js](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/cgsn.js) |
 | AT       | [examples/atc.js](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/atc.js)   |
+| BSL      | [examples/bsl.js](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/bsl.js)   |

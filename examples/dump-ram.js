@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { CGSN, serialWaitForOpen } from "@sie-js/serial";
+import { CGSN, portOpen } from "@sie-js/serial";
 import { SerialPort } from 'serialport';
 import { parseArgs } from 'node:util';
 import { sprintf } from 'sprintf-js';
@@ -52,7 +52,7 @@ if (isNaN(addr) || isNaN(size)) {
 	process.exit(1);
 }
 
-let port = await serialWaitForOpen(new SerialPort({ path: argv.port, baudRate: 115200 }));
+let port = await portOpen(new SerialPort({ path: argv.port, baudRate: 115200 }));
 let cgsn = new CGSN(port);
 
 if (await cgsn.connect()) {

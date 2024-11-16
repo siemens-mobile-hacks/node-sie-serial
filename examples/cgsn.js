@@ -1,4 +1,4 @@
-import { CGSN, serialWaitForOpen } from "@sie-js/serial";
+import { CGSN, AsyncSerialPort } from "@sie-js/serial";
 import { SerialPort } from 'serialport';
 import { parseArgs } from 'node:util';
 
@@ -25,7 +25,8 @@ if (argv.help || argv.usage) {
 	process.exit(0);
 }
 
-let port = await serialWaitForOpen(new SerialPort({ path: argv.values.port, baudRate: 115200 }));
+let port = new AsyncSerialPort(new SerialPort({ path: argv.values.port, baudRate: 115200, autoOpen: false }));
+await port.open();
 let cgsn = new CGSN(port);
 
 if (await cgsn.connect()) {

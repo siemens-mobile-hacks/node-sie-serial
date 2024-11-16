@@ -1,6 +1,6 @@
 import createDebug from 'debug';
 import { AtChannel } from "./AtChannel.js";
-import { serialPortAsyncUpdate } from './utils.js';
+import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { sprintf } from 'sprintf-js';
 
 const debug = createDebug('cgsn');
@@ -31,6 +31,8 @@ export class CGSN {
 	isConnected = false;
 
 	constructor(port = null) {
+		if (!(port instanceof AsyncSerialPort))
+			throw new Error(`Port is not AsyncSerialPort!`);
 		this.port = port;
 		this.atc = new AtChannel(port);
 	}
@@ -42,7 +44,7 @@ export class CGSN {
 		this.atc.start();
 		testBaudrates ||= SERIAL_BAUDRATES;
 		for (let baudrate of testBaudrates) {
-			await serialPortAsyncUpdate(this.port, { baudRate: baudrate });
+			await this.port.update({ baudRate: baudrate });
 			if (await this._tryHandshake(3)) {
 				this.isConnected = true;
 				if (!await this._checkCgsnPatch()) {
@@ -86,7 +88,7 @@ export class CGSN {
 	}
 
 	async _tryHandshake() {
-		debug(`Probing AT handshake at ${this.port.baudRate}...`);
+		debug(`Probing AT handshake at ${this.port.getBaudrate()}...`);
 		if (await this.atc.handshake()) {
 			debug("Phone is found!");
 			return true;
@@ -131,7 +133,7 @@ export class CGSN {
 	}
 
 	getBaudrate() {
-		return this.port.baudRate;
+		return this.port.getBaudrate();
 	}
 
 	async getMaxBaudrate(limitBaudrate = 0) {
@@ -140,7 +142,7 @@ export class CGSN {
 
 		if (this.connectionType == "USB" || this.connectionType == "BLUE") {
 			// Useless for USB or Bluetooth
-			return this.port.baudRate;
+			return this.port.getBaudrate();
 		}
 
 		let response;
@@ -180,7 +182,7 @@ export class CGSN {
 		if (!this.isConnected)
 			return false;
 
-		let prevBaudRate = this.port.baudRate;
+		let prevBaudRate = this.port.getBaudrate();
 		if (prevBaudRate == baudrate)
 			return true;
 
@@ -191,7 +193,7 @@ export class CGSN {
 			return false;
 		}
 
-		await serialPortAsyncUpdate(this.port, { baudRate: baudrate });
+		await this.port.update({ baudRate: baudrate });
 
 		debug(`Checking new baudrate....`);
 		for (let i = 0; i < 3; i++) {
@@ -371,7 +373,7 @@ export class CGSN {
 	}
 
 	async disconnect() {
-		if (this.isConnected && this.port?.isOpen)
+		if (this.isConnected && this.port?.isOpen())
 			await this.setBaudrate(115200);
 		this.atc.stop();
 		this.isConnected = false;

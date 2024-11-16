@@ -2,7 +2,7 @@ import createDebug from 'debug';
 import { crc16 } from './crc16.js';
 import { AtChannel } from './AtChannel.js';
 import { sprintf } from 'sprintf-js';
-import { serialPortAsyncUpdate, serialPortAsyncWrite } from './utils.js';
+import { AsyncSerialPort } from './AsyncSerialPort.js';
 
 const debug = createDebug('bfc');
 
@@ -62,6 +62,8 @@ export class BFC {
 	connectionError = null;
 
 	constructor(port = null) {
+		if (!(port instanceof AsyncSerialPort))
+			throw new Error(`Port is not AsyncSerialPort!`);
 		this.port = port;
 		this.serialDataCallback = (data) => this._handleSerialData(data);
 		this.serialCloseCallback = () => this._handleSerialClose();
@@ -114,7 +116,7 @@ export class BFC {
 		this._setMode(BFC_MODE.BFC);
 		for (let baudRate of SERIAL_BAUDRATES) {
 			debug(`Probing BFC at baudrate: ${baudRate}`);
-			await serialPortAsyncUpdate(this.port, { baudRate });
+			await this.port.update({ baudRate });
 			await this.sendFrame(DEFAULT_CHANNEL_ID, 0x02, BFC_FRAME_TYPES.STATUS, 0, [0x80, 0x11]);
 			await this.sendFrame(DEFAULT_CHANNEL_ID, 0x02, BFC_FRAME_TYPES.STATUS, 0, [0x80, 0x11]);
 			await this.sendFrame(DEFAULT_CHANNEL_ID, 0x02, BFC_FRAME_TYPES.STATUS, 0, [0x80, 0x11]);
@@ -129,7 +131,7 @@ export class BFC {
 	}
 
 	async _trySwitchFromAtToBfc() {
-		await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
+		await this.port.update({ baudRate: 115200 });
 
 		debug(`Probing AT handshake...`);
 		this._setMode(BFC_MODE.AT);
@@ -170,7 +172,7 @@ export class BFC {
 		if (this.mode == BFC_MODE.BFC)
 			throw new Error(`BFC already connected.`);
 
-		if (!this.port?.isOpen)
+		if (!this.port?.isOpen())
 			throw new Error(`Serial port closed.`);
 
 		if (await this._trySwitchFromAtToBfc())
@@ -185,11 +187,11 @@ export class BFC {
 	async disconnect() {
 		if (this.mode != BFC_MODE.BFC)
 			return true;
-		if (this.mode == BFC_MODE.BFC && this.port?.isOpen) {
+		if (this.mode == BFC_MODE.BFC && this.port?.isOpen()) {
 			if (await this.ping()) {
 				try {
 					await this.sendAT("AT^SQWE = 0\r", 250);
-					await serialPortAsyncUpdate(this.port, { baudRate: 115200 });
+					await this.port.update({ baudRate: 115200 });
 					await new Promise((resolve) => setTimeout(resolve, 300));
 				} catch (e) {
 					debug(`disconnect error: ${e.message}`);
@@ -388,7 +390,7 @@ export class BFC {
 		let ack = (frameFlags & BFC_FRAME_FLAGS.ACK) != 0 ? 1 : 0;
 		debug(sprintf(`TX %02X >> %02X [CRC:%d, ACK:%d, TYPE:%02X] %s`, +src, +dst, crc, ack, frameType, payload.toString('hex')));
 
-		await serialPortAsyncWrite(this.port, pkt);
+		await this.port.write(pkt);
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -404,7 +406,7 @@ export class BFC {
 	}
 
 	async setBestBaudrate(limitBaudrate = 0) {
-		let prevBaudRate = this.port.baudRate;
+		let prevBaudRate = this.port.getBaudrate();
 
 		if (prevBaudRate > 115200)
 			return true;
@@ -424,7 +426,7 @@ export class BFC {
 
 		if (foundBestBaudrate) {
 			await new Promise((resolve) => setTimeout(resolve, 300));
-			await serialPortAsyncUpdate(this.port, { baudRate: foundBestBaudrate });
+			await this.port.update({ baudRate: foundBestBaudrate });
 
 			for (let i = 0; i < 3; i++) {
 				debug(`ping...`);
@@ -434,7 +436,7 @@ export class BFC {
 				}
 			}
 
-			await serialPortAsyncUpdate(this.port, { baudRate: prevBaudRate });
+			await this.port.update({ baudRate: prevBaudRate });
 			await new Promise((resolve) => setTimeout(resolve, 100));
 
 			debug(`Failed to set new baudrate.`);
