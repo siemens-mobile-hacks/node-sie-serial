@@ -73,34 +73,34 @@ export class AsyncSerialPort {
 			};
 			let onTimeout = () => {
 				removeListeners();
-				resolve(result);
+				resolve(result?.subarray(0, bytesRead));
 			};
 			let onClose = () => {
 				removeListeners();
-				resolve(result);
+				resolve(result?.subarray(0, bytesRead));
 			};
 			let onEnd = () => {
 				removeListeners();
-				resolve(result);
+				resolve(result?.subarray(0, bytesRead));
 			};
 			let onError = (err) => {
 				removeListeners();
 				reject(err);
 			};
 			let onReadable = () => {
-				let chunk = this.port.read(size - bytesRead);
-				if (chunk == null)
+				let bytesToRead = Math.min(size - bytesRead, this.port.readableLength);
+				if (bytesToRead == 0)
 					return;
 
-				if (result) {
-					result = Buffer.concat([result, chunk]);
-				} else {
-					result = chunk;
-				}
+				let chunk = this.port.read(bytesToRead);
+				if (!result)
+					result = Buffer.alloc(size);
+				chunk.copy(result, bytesRead);
+				bytesRead += chunk.length
 
-				if (result.length == size) {
+				if (bytesRead == size) {
 					removeListeners();
-					resolve(result);
+					resolve(result?.subarray(0, bytesRead));
 				}
 			};
 

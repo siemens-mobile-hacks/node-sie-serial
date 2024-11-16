@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { loadBootCode } from "@sie-js/serial";
 import { AsyncSerialPort } from "@sie-js/serial";
 import { parseArgs } from 'node:util';
@@ -83,5 +84,8 @@ await port.open();
 
 let result = await loadBootCode(port, bootcode);
 console.log(result);
+
+let eblResponse = await port.read(1024, 1000);
+console.log(eblResponse);
 
 await port.close();
