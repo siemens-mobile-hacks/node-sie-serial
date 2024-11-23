@@ -85,7 +85,13 @@ await port.open();
 let result = await loadBootCode(port, bootcode);
 console.log(result);
 
-let eblResponse = await port.read(1024, 1000);
-console.log(eblResponse);
+while (true) {
+	let byte = await port.readByte(10);
+	if (byte == -1)
+		continue;
+	if (byte == 0)
+		break;
+	process.stdout.write(Buffer.from([byte]));
+}
 
 await port.close();
