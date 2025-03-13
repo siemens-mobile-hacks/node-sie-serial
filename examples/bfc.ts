@@ -1,0 +1,98 @@
+import fs from 'node:fs';
+import { parseArgs } from 'node:util';
+import { AsyncSerialPort, BFC, BfcHardwareInfo, BfcSoftwareInfo } from "../src/index.js";
+import { SerialPort } from "serialport";
+
+const { values: argv } = parseArgs({
+	options: {
+		port: {
+			type: "string",
+			default: "/dev/ttyUSB0"
+		},
+		help: {
+			type: "boolean",
+			short: "h",
+			default: false
+		},
+		usage: {
+			type: "boolean",
+			default: false
+		}
+	}
+});
+
+if (argv.help || argv.usage) {
+	console.log(`USAGE: bfc.js --port /dev/ttyUSB0`);
+	process.exit(0);
+}
+
+const port = new AsyncSerialPort(new SerialPort({
+	path: argv.port,
+	baudRate: 115200,
+	autoOpen: false
+}));
+await port.open();
+
+const bus = new BFC(port);
+port.on('error', (err) => console.error('Port error', err));
+port.on('close', () => console.error('Port close'));
+
+console.log('Connecting...');
+await bus.connect();
+await bus.setBestBaudrate();
+
+console.log('BASEBAND', await bus.getBaseband());
+console.log('VENDOR', await bus.getVendorName());
+console.log('PRODUCT', await bus.getProductName());
+console.log('SW VERSION', await bus.getSwVersion());
+console.log('LANGUAGE', await bus.getLanguageGroup());
+console.log('IMEI', await bus.getIMEI());
+
+const hwiKeys = [
+	BfcHardwareInfo.RFChipSet,
+	BfcHardwareInfo.HwDetection,
+	BfcHardwareInfo.SWPlatform,
+	BfcHardwareInfo.PAType,
+	BfcHardwareInfo.LEDType,
+	BfcHardwareInfo.LayoutType,
+	BfcHardwareInfo.BandType,
+	BfcHardwareInfo.StepUpType,
+	BfcHardwareInfo.BluetoothType,
+];
+for (const k of hwiKeys) {
+	console.log('[HwInfo]', k, await bus.getHwInfo(k));
+}
+
+const swiKeys = [
+	BfcSoftwareInfo.DB_Name,
+	BfcSoftwareInfo.Baseline_Version,
+	BfcSoftwareInfo.Baseline_Release,
+	BfcSoftwareInfo.Project_Name,
+	BfcSoftwareInfo.SW_Builder,
+	BfcSoftwareInfo.Link_Time_Stamp,
+	BfcSoftwareInfo.Reconfigure_Time_Stamp,
+];
+for (const k of swiKeys) {
+	console.log('[SwInfo]', k, await bus.getSwInfo(k));
+}
+
+const displaysCnt = await bus.getDisplayCount();
+console.log(`Total displays: ${displaysCnt}`);
+
+for (let i = 1; i <= displaysCnt; i++) {
+	const info = await bus.getDisplayInfo(i);
+	console.log(info);
+
+	const bufferInfo = await bus.getDisplayBufferInfo(info.clientId);
+	console.log(bufferInfo);
+
+	const result = await bus.getDisplayBuffer(i, {
+		onProgress: ({ cursor, total, elapsed }) => {
+			console.log(cursor / total * 100, `${elapsed} s.`);
+		}
+	});
+	fs.writeFileSync("screen.data", result.buffer);
+}
+
+await bus.disconnect();
+await port.close();

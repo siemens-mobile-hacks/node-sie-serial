@@ -1,9 +1,8 @@
-import { CGSN, AsyncSerialPort } from "@sie-js/serial";
-import { SerialPortStream } from '@serialport/stream';
-import { autoDetect as autoDetectSerialBinding } from "@sie-js/node-serialport-bindings-cpp";
 import { parseArgs } from 'node:util';
+import { AsyncSerialPort, CGSN } from "../src/index.js";
+import { SerialPort } from "serialport";
 
-const argv = parseArgs({
+const { values: argv } = parseArgs({
 	options: {
 		port: {
 			type: "string",
@@ -26,15 +25,14 @@ if (argv.help || argv.usage) {
 	process.exit(0);
 }
 
-let port = new AsyncSerialPort(new SerialPortStream({
-	path: argv.values.port,
+const port = new AsyncSerialPort(new SerialPort({
+	path: argv.port,
 	baudRate: 115200,
-	autoOpen: false,
-	binding: autoDetectSerialBinding()
+	autoOpen: false
 }));
 await port.open();
-let cgsn = new CGSN(port);
 
+const cgsn = new CGSN(port);
 if (await cgsn.connect()) {
 	console.log('Connected to CGSN!');
 } else {
@@ -42,16 +40,15 @@ if (await cgsn.connect()) {
 	process.exit(1);
 }
 
-await cgsn.setBestBaudrate();
+await cgsn.setBestBaudRate();
 
 await cgsn.readMemory(0xA0000000, 1024, {
-	onProgress(cursor, total, elapsed) {
-		let speed = cursor / (elapsed / 1000) || 0;
-		let estimated = speed ? Math.round((total - cursor) / speed) : 0;
+	onProgress: (cursor, total, elapsed) => {
+		const speed = cursor / (elapsed / 1000) || 0;
+		const estimated = speed ? Math.round((total - cursor) / speed) : 0;
 		console.log(`read: ${Math.round(cursor / total * 100)}% | ${Math.round(elapsed / 1000)} s | speed: ${Math.round(speed / 1024)} kB/s | estimated time: ${estimated}`);
 	}
 });
 
 await cgsn.disconnect();
-cgsn.destroy();
-port.close();
+await port.close();

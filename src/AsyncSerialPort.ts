@@ -1,94 +1,97 @@
-export class AsyncSerialPort {
-	port;
+import { SerialPortStream } from "@serialport/stream";
+import { BindingInterface, SetOptions } from "@serialport/bindings-interface";
 
-	constructor(port) {
+export class AsyncSerialPort<T extends BindingInterface> {
+	private readonly port: SerialPortStream<T>;
+
+	constructor(port: SerialPortStream<T>) {
 		this.port = port;
 	}
 
-	on(event, callback) {
-		return this.port.on(event, callback);
+	on(event: string | symbol, listener: (...args: any[]) => void) {
+		return this.port.on(event, listener);
 	}
 
-	off(event, callback) {
-		return this.port.off(event, callback);
+	off(event: string | symbol, listener: (...args: any[]) => void) {
+		return this.port.off(event, listener);
 	}
 
-	isOpen() {
+	get isOpen(): boolean {
 		return this.port.isOpen;
 	}
 
-	getBaudrate() {
+	get baudRate(): number {
 		return this.port.baudRate;
 	}
 
-	open() {
+	async open(): Promise<void> {
 		if (this.port.isOpen)
-			return true;
-
+			return;
 		return new Promise((resolve, reject) => {
 			this.port.open((err) => {
 				if (err) {
 					reject(err);
 				} else {
-					resolve(true);
+					resolve();
 				}
 			});
 		});
 	}
 
-	async close() {
+	async close(): Promise<void> {
 		if (!this.port.isOpen)
-			return true;
-
+			return;
 		return new Promise((resolve, reject) => {
 			this.port.close((err) => {
 				if (err) {
 					reject(err);
 				} else {
-					resolve(true);
+					resolve();
 				}
 			});
 		});
 	}
 
-	async readByte(timeout = 0) {
-		let byte = await this.read(1, timeout);
+	async readByte(timeout = 0): Promise<number> {
+		const byte = await this.read(1, timeout);
 		return byte == null ? -1 : byte[0];
 	}
 
-	read(size, timeout) {
+	async read(size: number, timeout?: number): Promise<Buffer | undefined> {
 		return new Promise((resolve, reject) => {
-			let result;
+			let result: Buffer | undefined;
 			let bytesRead = 0;
-			let timeoutTimer;
+			let timeoutTimer: NodeJS.Timeout | undefined;
 
-			let removeListeners = () => {
+			const removeListeners = () => {
 				this.port.removeListener("close", onClose);
 				this.port.removeListener("end", onEnd);
 				this.port.removeListener("error", onError);
 				this.port.removeListener("readable", onReadable);
 
-				if (timeoutTimer)
+				if (timeoutTimer) {
 					clearTimeout(timeoutTimer);
+					timeoutTimer = undefined;
+				}
 			};
-			let onTimeout = () => {
+			const onTimeout = () => {
 				removeListeners();
 				resolve(result?.subarray(0, bytesRead));
 			};
-			let onClose = () => {
+			const onClose = () => {
 				removeListeners();
 				resolve(result?.subarray(0, bytesRead));
 			};
-			let onEnd = () => {
+			const onEnd = () => {
 				removeListeners();
 				resolve(result?.subarray(0, bytesRead));
 			};
-			let onError = (err) => {
+			const onError = (err: Error) => {
 				removeListeners();
 				reject(err);
 			};
-			let onReadable = () => {
-				let bytesToRead = Math.min(size - bytesRead, this.port.readableLength);
+			const onReadable = () => {
+				const bytesToRead = Math.min(size - bytesRead, this.port.readableLength);
 				if (bytesToRead == 0)
 					return;
 
@@ -114,56 +117,56 @@ export class AsyncSerialPort {
 		});
 	}
 
-	write(data) {
+	async write(data: any): Promise<void> {
 		return new Promise((resolve, reject) => {
 			this.port.write(data);
 			this.port.drain((err) => {
 				if (err) {
 					reject(err);
 				} else {
-					resolve(true);
+					resolve();
 				}
 			});
 		});
 	}
 
-	getSignals() {
+	async getSignals(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			this.port.get((err) => {
 				if (err) {
 					reject(err);
 				} else {
-					resolve(true);
+					resolve();
 				}
 			});
 		});
 	}
 
-	setSignals(signals) {
+	async setSignals(signals: SetOptions): Promise<void> {
 		return new Promise((resolve, reject) => {
 			this.port.set(signals, (err) => {
 				if (err) {
 					reject(err);
 				} else {
-					resolve(true);
+					resolve();
 				}
 			});
 		});
 	}
 
-	update(settings) {
+	update(settings: { baudRate: number }): Promise<void> {
 		return new Promise((resolve, reject) => {
 			this.port.update(settings, (err) => {
 				if (err) {
 					reject(err);
 				} else {
-					resolve(true);
+					resolve();
 				}
 			});
 		});
 	}
 
-	getPort() {
+	getParentPort(): SerialPortStream<T> {
 		return this.port;
 	}
 }

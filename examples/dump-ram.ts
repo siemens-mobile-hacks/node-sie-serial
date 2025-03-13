@@ -1,9 +1,8 @@
 import fs from 'fs';
-import { CGSN, AsyncSerialPort } from "@sie-js/serial";
-import { SerialPortStream } from '@serialport/stream';
-import { autoDetect as autoDetectSerialBinding } from "@sie-js/node-serialport-bindings-cpp";
 import { parseArgs } from 'node:util';
 import { sprintf } from 'sprintf-js';
+import { AsyncSerialPort, CGSN } from "../src/index.js";
+import { SerialPort } from "serialport";
 
 const { values: argv } = parseArgs({
 	options: {
@@ -36,14 +35,14 @@ const { values: argv } = parseArgs({
 	}
 });
 
-let badParams = !argv.size || !argv.addr || !argv.out;
+const badParams = !argv.size || !argv.addr || !argv.out;
 if (badParams || argv.help || argv.usage) {
 	console.log(`USAGE: csgn.js --port /dev/ttyUSB0 --addr 0xA8000000 --size 0x1000000 --out /tmp/ram.bin`);
 	process.exit(0);
 }
 
-let addr = parseInt(argv.addr, 16);
-let size = parseInt(argv.size, 16);
+const addr = parseInt(argv.addr!, 16);
+const size = parseInt(argv.size!, 16);
 
 console.log(sprintf("Addr: 0x%08X", addr));
 console.log(sprintf("Size: 0x%08X (%d Mb)", size, size / 1024 / 1024));
@@ -53,14 +52,13 @@ if (isNaN(addr) || isNaN(size)) {
 	process.exit(1);
 }
 
-let port = new AsyncSerialPort(new SerialPortStream({
-	path: argv.values.port,
+const port = new AsyncSerialPort(new SerialPort({
+	path: argv.port,
 	baudRate: 115200,
-	autoOpen: false,
-	binding: autoDetectSerialBinding()
+	autoOpen: false
 }));
 await port.open();
-let cgsn = new CGSN(port);
+const cgsn = new CGSN(port);
 
 if (await cgsn.connect()) {
 	console.log('Connected to CGSN!');
@@ -69,9 +67,9 @@ if (await cgsn.connect()) {
 	process.exit(1);
 }
 
-await cgsn.setBestBaudrate(parseInt(argv.baudrate));
+await cgsn.setBestBaudRate(parseInt(argv.baudrate));
 
-let result = await cgsn.readMemory(addr, size, {
+const result = await cgsn.readMemory(addr, size, {
 	onProgress(cursor, total, elapsed) {
 		let speed = cursor / (elapsed / 1000) || 0;
 		let estimated = speed ? Math.round((total - cursor) / speed) : 0;
@@ -79,8 +77,8 @@ let result = await cgsn.readMemory(addr, size, {
 	}
 });
 
-fs.writeFileSync(argv.out, result.buffer);
+if (result.success)
+	fs.writeFileSync(argv.out!, result.buffer);
 
 await cgsn.disconnect();
-cgsn.destroy();
-port.close();
+await port.close();

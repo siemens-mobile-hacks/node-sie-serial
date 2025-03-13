@@ -1,3 +1,7 @@
+.idea
+*.bin
+*.data
+
 # Logs
 logs
 *.log

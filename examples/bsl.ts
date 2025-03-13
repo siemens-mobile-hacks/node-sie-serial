@@ -1,11 +1,9 @@
 import fs from 'fs';
-import { loadBootCode } from "@sie-js/serial";
-import { AsyncSerialPort } from "@sie-js/serial";
 import { parseArgs } from 'node:util';
-import { SerialPortStream } from '@serialport/stream';
-import { autoDetect as autoDetectSerialBinding } from "@sie-js/node-serialport-bindings-cpp";
+import { AsyncSerialPort, loadBootCode } from "../src/index.js";
+import { SerialPort } from "serialport";
 
-const SPECIAL_BOOTS = {
+const SPECIAL_BOOTS: Record<string, Buffer> = {
 	BurninMode: Buffer.from(
 		"F104A0E3201090E5FF10C1E3A51081E3" +
 		"201080E51EFF2FE10401080000000000" +
@@ -35,7 +33,7 @@ const SPECIAL_BOOTS = {
 	),
 };
 
-const argv = parseArgs({
+const { values: argv } = parseArgs({
 	options: {
 		port: {
 			type: "string",
@@ -57,36 +55,35 @@ const argv = parseArgs({
 	}
 });
 
-if (argv.values.help || argv.values.usage) {
+if (argv.help || argv.usage) {
 	console.log(`USAGE: bsl.js --port /dev/ttyUSB0 --boot ServiceMode`);
 	process.exit(0);
 }
 
-let bootcode;
-if ((argv.values.boot in SPECIAL_BOOTS)) {
-	console.log(`Using built-in boot ${argv.values.boot}`);
-	bootcode = SPECIAL_BOOTS[argv.values.boot];
-} else if (argv.values.boot.match(/^[a-f0-9]+$/i)) {
+let bootCode: Buffer;
+if ((argv.boot in SPECIAL_BOOTS)) {
+	console.log(`Using built-in boot ${argv.boot}`);
+	bootCode = SPECIAL_BOOTS[argv.boot];
+} else if (argv.boot.match(/^[a-f0-9]+$/i)) {
 	console.log(`Using HEX boot from cmdline.`);
-	bootcode = Buffer.from(SPECIAL_BOOTS[argv.values.boot], "hex");
+	bootCode = Buffer.from(argv.boot, "hex");
 } else {
-	console.log(`Using HEX boot from file ${argv.values.boot}.`);
-	bootcode = fs.readFileSync(argv.values.boot);
+	console.log(`Using HEX boot from file ${argv.boot}.`);
+	bootCode = fs.readFileSync(argv.boot);
 }
 
-let port = new AsyncSerialPort(new SerialPortStream({
-	path: argv.values.port,
+const port = new AsyncSerialPort(new SerialPort({
+	path: argv.port,
 	baudRate: 115200,
-	autoOpen: false,
-	binding: autoDetectSerialBinding()
+	autoOpen: false
 }));
 await port.open();
 
-let result = await loadBootCode(port, bootcode);
+const result = await loadBootCode(port, bootCode);
 console.log(result);
 
 while (true) {
-	let byte = await port.readByte(10);
+	const byte = await port.readByte(10);
 	if (byte == -1)
 		continue;
 	if (byte == 0)

@@ -1,9 +1,8 @@
-import { AtChannel, AsyncSerialPort } from "@sie-js/serial";
-import { SerialPortStream } from '@serialport/stream';
-import { autoDetect as autoDetectSerialBinding } from "@sie-js/node-serialport-bindings-cpp";
 import { parseArgs } from 'node:util';
+import { AsyncSerialPort, AtChannel } from "../src/index.js";
+import { SerialPort } from "serialport";
 
-const argv = parseArgs({
+const { values: argv } = parseArgs({
 	options: {
 		port: {
 			type: "string",
@@ -26,19 +25,18 @@ if (argv.help || argv.usage) {
 	process.exit(0);
 }
 
-let port = new AsyncSerialPort(new SerialPortStream({
-	path: argv.values.port,
+const port = new AsyncSerialPort(new SerialPort({
+	path: argv.port,
 	baudRate: 115200,
-	autoOpen: false,
-	binding: autoDetectSerialBinding()
+	autoOpen: false
 }));
 await port.open();
-let atc = new AtChannel(port);
+
+const atc = new AtChannel(port);
 atc.start();
 
 console.log(await atc.handshake());
 console.log(await atc.sendCommandNumeric("AT+CGSN"));
 
 atc.stop();
-atc.destroy();
 await port.close();

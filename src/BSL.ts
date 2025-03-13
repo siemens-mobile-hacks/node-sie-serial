@@ -4,34 +4,50 @@ import { AsyncSerialPort } from './AsyncSerialPort.js';
 const IGNITION_ON_PERIOD = 50;
 const IGNITION_OFF_PERIOD = 150;
 
-const CPU_NAMES = {
+const CPU_NAMES: Record<number, string> = {
 	0xB0:	'PMB8875 (SGold)',
 	0xC0:	'PMB8876 (SGold)',
 };
 
-const CPU_TYPES = {
+const CPU_TYPES: Record<number, string> = {
 	0xB0:	'sgold',
 	0xC0:	'sgold2',
 };
 
 const debug = createDebug("bsl");
 
-export const BSL_ERRORS = {
-	SUCCESS:	0,
-	TIMEOUT:	1,
-	DENIED:		2,
-	UNKNOWN:	3,
-	ABORTED:	4,
+export enum BSLStatus {
+	SUCCESS,
+	TIMEOUT,
+	DENIED,
+	UNKNOWN,
+	ABORTED
+}
+
+export type LoadBootCodeOptions = {
+	autoIgnition?: boolean;
+	autoIgnitionInvertPolarity?: boolean;
+	signal?: AbortSignal | null;
 };
 
-export async function loadBootCode(port, code, options = {}) {
-	if (!(port instanceof AsyncSerialPort))
-		throw new Error(`Port is not AsyncSerialPort!`);
+type LoadBootCodeResultOk = {
+	success: true;
+};
 
+type LoadBootCodeResultError = {
+	success: false;
+	error: string;
+};
+
+export type LoadBootCodeResult = (LoadBootCodeResultOk | LoadBootCodeResultError) & {
+	status: BSLStatus;
+	cpu: string;
+};
+
+export async function loadBootCode(port: AsyncSerialPort<any>, code: Buffer, options: LoadBootCodeOptions = {}): Promise<LoadBootCodeResult> {
 	options = {
 		autoIgnition: true,
 		autoIgnitionInvertPolarity: false,
-		signal: null,
 		...options
 	};
 
@@ -46,7 +62,7 @@ export async function loadBootCode(port, code, options = {}) {
 
 	while (!options.signal?.aborted) {
 		if (options.autoIgnition) {
-			let ignitionTimeout = lastDtr ? IGNITION_ON_PERIOD : IGNITION_OFF_PERIOD;
+			const ignitionTimeout = lastDtr ? IGNITION_ON_PERIOD : IGNITION_OFF_PERIOD;
 			if ((Date.now() - lastIgnition) >= ignitionTimeout) {
 				lastDtr = !lastDtr;
 				if (options.autoIgnitionInvertPolarity) {
@@ -60,7 +76,7 @@ export async function loadBootCode(port, code, options = {}) {
 
 		await port.write("AT");
 
-		let response = await port.readByte(5);
+		const response = await port.readByte(5);
 		if (response != -1 && (response == 0xB0 || response == 0xC0)) {
 			cpuType = response;
 			debug(`Detected CPU: ${CPU_NAMES[cpuType]}`);
@@ -70,47 +86,42 @@ export async function loadBootCode(port, code, options = {}) {
 
 	await port.setSignals({ dtr: options.autoIgnitionInvertPolarity });
 
-	let result = {
-		cpu: CPU_TYPES[cpuType],
-		get success() {
-			return this.status == BSL_ERRORS.SUCCESS
-		},
-		status: BSL_ERRORS.SUCCESS,
-		error: null
-	};
+	const cpu = CPU_TYPES[cpuType];
+	let status: BSLStatus;
+	let error: string | undefined;
 
 	if (options.signal?.aborted) {
-		result.error = "Aborted by user.";
-		result.status = BSL_ERRORS.ABORTED;
+		error = "Aborted by user.";
+		status = BSLStatus.ABORTED;
 	} else {
 		await port.write(genPayload(code));
 
 		debug(`Sending EBL code (${code.length} bytes)...`);
-		let response = await port.readByte(1000);
+		const response = await port.readByte(1000);
 		if (response == -1) {
-			result.error = "Timeout, ACK not received.";
-			result.status = BSL_ERRORS.TIMEOUT;
+			error = "Timeout, ACK not received.";
+			status = BSLStatus.TIMEOUT;
 		} else if (response == 0xC1 || response == 0xB1) {
-			result.status = BSL_ERRORS.SUCCESS;
+			status = BSLStatus.SUCCESS;
 		} else if (response == 0x1C || response == 0x1B) {
-			result.error = "EBL code is denied by bootloader.";
-			result.status = BSL_ERRORS.DENIED;
+			error = "EBL code is denied by bootloader.";
+			status = BSLStatus.DENIED;
 		} else {
-			result.error = `Unexpected response: ${response.toString(16)}`;
-			result.status = BSL_ERRORS.UNKNOWN;
+			error = `Unexpected response: ${response.toString(16)}`;
+			status = BSLStatus.UNKNOWN;
 		}
 	}
 
-	if (result.status == BSL_ERRORS.SUCCESS) {
+	if (status == BSLStatus.SUCCESS) {
 		debug("ACK received, EBL successfully loaded.");
+		return { success: true, status, cpu };
 	} else {
-		debug(`ERROR: ${result.error}`);
+		debug(`ERROR: ${error}`);
+		return { success: false, error: error!, status, cpu };
 	}
-
-	return result;
 }
 
-function genPayload(code) {
+function genPayload(code: Buffer): Buffer {
 	let chk = 0;
 	for (let i = 0; i < code.length; i++)
 		chk ^= code[i];

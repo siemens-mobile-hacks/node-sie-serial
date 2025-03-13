@@ -33,7 +33,7 @@ const CRC_TABLE = [
 	0x7BC7, 0x6A4E, 0x58D5, 0x495C, 0x3DE3, 0x2C6A, 0x1EF1, 0x0F78
 ];
 
-export function crc16(buffer, offset, len) {
+export function crc16(buffer: Buffer, offset: number, len: number) {
 	let crc = 0xFFFF;
 	for (let i = offset; i < offset + len; i++)
 		crc = (crc >> 8) ^ CRC_TABLE[(crc & 0xFF) ^ buffer[i]];
