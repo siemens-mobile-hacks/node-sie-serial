@@ -60,7 +60,7 @@ const hwiKeys = [
 	BfcHardwareInfo.BluetoothType,
 ];
 for (const k of hwiKeys) {
-	console.log('[HwInfo]', k, await bus.getHwInfo(k));
+	console.log('[HwInfo]', BfcHardwareInfo[k], await bus.getHwInfo(k));
 }
 
 const swiKeys = [
@@ -73,7 +73,7 @@ const swiKeys = [
 	BfcSoftwareInfo.Reconfigure_Time_Stamp,
 ];
 for (const k of swiKeys) {
-	console.log('[SwInfo]', k, await bus.getSwInfo(k));
+	console.log('[SwInfo]', BfcSoftwareInfo[k], await bus.getSwInfo(k));
 }
 
 const displaysCnt = await bus.getDisplayCount();
@@ -88,7 +88,7 @@ for (let i = 1; i <= displaysCnt; i++) {
 
 	const result = await bus.getDisplayBuffer(i, {
 		onProgress: ({ cursor, total, elapsed }) => {
-			console.log(cursor / total * 100, `${elapsed} s.`);
+			console.log(`${cursor / total * 100}%`, `${elapsed} s.`);
 		}
 	});
 	fs.writeFileSync("screen.data", result.buffer);
