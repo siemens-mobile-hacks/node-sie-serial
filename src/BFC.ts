@@ -136,9 +136,9 @@ export class BFC {
 	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
 	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
 	private readonly atc: AtChannel;
-	private readonly port: AsyncSerialPort<any>;
+	private readonly port: AsyncSerialPort;
 
-	constructor(port: AsyncSerialPort<any>) {
+	constructor(port: AsyncSerialPort) {
 		this.port = port;
 		this.atc = new AtChannel(port);
 	}

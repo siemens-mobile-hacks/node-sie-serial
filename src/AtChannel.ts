@@ -24,7 +24,7 @@ export type AtUnsolicitedHandler = {
 };
 
 export class AtChannel {
-	private port: AsyncSerialPort<any>;
+	private port: AsyncSerialPort;
 	private buffer: string = "";
 	private unsolicitedHandlers: AtUnsolicitedHandler[] = [];
 	private paused = true;
@@ -42,7 +42,7 @@ export class AtChannel {
 	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
 	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
 
-	constructor(port: AsyncSerialPort<any>) {
+	constructor(port: AsyncSerialPort) {
 		this.port = port;
 	}
 

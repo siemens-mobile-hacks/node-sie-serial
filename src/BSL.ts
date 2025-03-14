@@ -44,7 +44,7 @@ export type LoadBootCodeResult = (LoadBootCodeResultOk | LoadBootCodeResultError
 	cpu: string;
 };
 
-export async function loadBootCode(port: AsyncSerialPort<any>, code: Buffer, options: LoadBootCodeOptions = {}): Promise<LoadBootCodeResult> {
+export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options: LoadBootCodeOptions = {}): Promise<LoadBootCodeResult> {
 	options = {
 		autoIgnition: true,
 		autoIgnitionInvertPolarity: false,

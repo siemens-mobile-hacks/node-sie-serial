@@ -71,12 +71,12 @@ export type CgsnReadWriteOptions = {
 };
 
 export class CGSN {
-	private readonly port: AsyncSerialPort<any>;
+	private readonly port: AsyncSerialPort;
 	private readonly atc: AtChannel;
 	private connectionType: string = "";
 	private isConnected = false;
 
-	constructor(port: AsyncSerialPort<any>) {
+	constructor(port: AsyncSerialPort) {
 		this.port = port;
 		this.atc = new AtChannel(port);
 	}

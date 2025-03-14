@@ -112,7 +112,7 @@ export class ChaosLoaderError extends Error {
 }
 
 export class ChaosLoader {
-	private readonly port: AsyncSerialPort<any>;
+	private readonly port: AsyncSerialPort;
 	private isConnected = false;
 	private heartbeatTimer?: NodeJS.Timeout;
 	private phoneInfo?: ChaosPhoneInfo;
@@ -122,7 +122,7 @@ export class ChaosLoader {
 		return Object.keys(BAUDRATES).map(parseInt);
 	}
 
-	constructor(port: AsyncSerialPort<any>) {
+	constructor(port: AsyncSerialPort) {
 		this.port = port;
 	}
 

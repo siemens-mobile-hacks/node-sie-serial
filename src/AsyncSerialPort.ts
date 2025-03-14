@@ -1,7 +1,7 @@
 import { SerialPortStream } from "@serialport/stream";
 import { BindingInterface, SetOptions } from "@serialport/bindings-interface";
 
-export class AsyncSerialPort<T extends BindingInterface> {
+export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 	private readonly port: SerialPortStream<T>;
 
 	constructor(port: SerialPortStream<T>) {
