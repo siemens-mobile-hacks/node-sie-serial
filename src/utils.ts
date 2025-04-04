@@ -27,3 +27,10 @@ export async function retryAsync<T>(callback: () => Promise<T>, options: { max: 
 	}
 	return lastResult!;
 }
+
+export function hexdump(buffer: Buffer) {
+	const str: string[] = [];
+	for (const byte of buffer)
+		str.push(byte.toString(16).padStart(2, "0").toUpperCase());
+	return str.join(" ");
+}
