@@ -18,3 +18,4 @@ npm i @sie-js/serial
 | CGSN     | [examples/cgsn.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/cgsn.ts) |
 | AT       | [examples/atc.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/atc.ts)   |
 | BSL      | [examples/bsl.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/bsl.ts)   |
+| DWD      | [examples/dwd.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/dwd.ts)   |
