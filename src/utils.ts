@@ -28,6 +28,19 @@ export async function retryAsync<T>(callback: () => Promise<T>, options: { max: 
 	return lastResult!;
 }
 
+export async function retryAsyncOnError(callback: () => Promise<void>, options: { max: number }) {
+	let lastError: unknown;
+	for (let i = 0; i < options.max; i++) {
+		try {
+			await callback();
+			return;
+		} catch (e) {
+			lastError = e;
+		}
+	}
+	throw lastError;
+}
+
 export function hexdump(buffer: Buffer) {
 	const str: string[] = [];
 	for (const byte of buffer)

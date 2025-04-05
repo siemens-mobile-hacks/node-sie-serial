@@ -4,9 +4,11 @@ import { AtChannel, AtCommandResponse } from './AtChannel.js';
 import { sprintf } from 'sprintf-js';
 import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { decodeCString, usePromiseWithResolvers } from './utils.js';
+import { ioReadMemory, IoReadResult, IoReadWriteOptions } from "./io.js";
 
 const debug = createDebug('bfc');
 
+const MAX_MEMORY_READ_CHUNK = 63 * 256;
 export const DEFAULT_CHANNEL_ID = 0x01;
 
 export enum BfcFrameFlags {
@@ -100,32 +102,10 @@ export type BfcDisplayBufferInfo = {
 	type: number;
 };
 
-export type BfcDisplayBufferData = BfcReadResult & {
+export type BfcDisplayBufferData = IoReadResult & {
 	mode: string;
 	width: number;
 	height: number;
-};
-
-export type BfcReadWriteProgress = {
-	cursor: number;
-	total: number;
-	elapsed: number;
-}
-
-export type BfcReadWriteOptions = {
-	onProgress?: (progress: BfcReadWriteProgress) => void;
-	progressInterval?: number;
-	signal?: AbortSignal | null;
-};
-
-export type BfcWriteResult = {
-	canceled: boolean;
-	written: number;
-};
-
-export type BfcReadResult = {
-	buffer: Buffer;
-	canceled: boolean;
 };
 
 export class BFC {
@@ -630,7 +610,7 @@ export class BFC {
 		};
 	}
 
-	async getDisplayBuffer(displayId: number, options: BfcReadWriteOptions = {}): Promise<BfcDisplayBufferData> {
+	async getDisplayBuffer(displayId: number, options: IoReadWriteOptions = {}): Promise<BfcDisplayBufferData> {
 		const displayInfo = await this.getDisplayInfo(displayId);
 		const displayBufferInfo = await this.getDisplayBufferInfo(displayInfo.clientId);
 
@@ -674,54 +654,17 @@ export class BFC {
 		});
 	}
 
-	async readMemory(address: number, length: number, options: BfcReadWriteOptions = {}): Promise<BfcReadResult> {
-		const validOptions = {
-			progressInterval: 500,
-			...options
-		};
-		const start = Date.now();
-		const buffer = Buffer.alloc(length);
-		let cursor = 0;
-		let canceled = false;
-		let lastProgressCalled = 0;
-		while (cursor < buffer.length) {
-			if (validOptions.signal?.aborted) {
-				canceled = true;
-				debug("Reading canceled by user.");
-				break;
-			}
-
-			if (!validOptions.progressInterval || (Date.now() - lastProgressCalled > validOptions.progressInterval && cursor > 0)) {
-				validOptions.onProgress && validOptions.onProgress({
-					cursor,
-					total: buffer.length,
-					elapsed: Date.now() - start
-				});
-				lastProgressCalled = Date.now();
-			}
-
-			const chunkSize = Math.min(buffer.length - cursor, 63 * 256);
-			for (let i = 0; i < 3; i++) {
-				try {
-					await this.readMemoryChunk(address + cursor, chunkSize, buffer, cursor);
-					break;
-				} catch (error) {
-					if (i == 2)
-						throw error;
-				}
-			}
-
-			cursor += chunkSize;
-		}
-		validOptions.onProgress && validOptions.onProgress({
-			cursor,
-			total: buffer.length,
-			elapsed: Date.now() - start
-		});
-		return { buffer, canceled };
+	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<IoReadResult> {
+		return ioReadMemory({
+			debug,
+			pageSize: MAX_MEMORY_READ_CHUNK,
+			align: 1,
+			maxRetries: 3,
+			read: this.readMemoryChunk.bind(this),
+		}, address, length, options);
 	}
 
-	async readMemoryChunk(address: number, length: number, buffer: Buffer, bufferOffset: number = 0): Promise<boolean> {
+	async readMemoryChunk(address: number, length: number, buffer: Buffer, bufferOffset: number = 0): Promise<void> {
 		const cmd = Buffer.alloc(9);
 		cmd.writeUInt8(0x01, 0);
 		cmd.writeUInt32LE(address, 1);
@@ -736,7 +679,7 @@ export class BFC {
 		let frameId = 0;
 		let offset = 0;
 
-		return await this.exec<boolean>(DEFAULT_CHANNEL_ID, 0x06, cmd, {
+		await this.exec<boolean>(DEFAULT_CHANNEL_ID, 0x06, cmd, {
 			parser: (frame, resolve) => {
 				if (frameId == 0) {
 					const ack = frame.data.readUInt16LE(0);

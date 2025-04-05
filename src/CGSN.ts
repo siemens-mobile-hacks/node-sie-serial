@@ -3,6 +3,7 @@ import { AtChannel } from "./AtChannel.js";
 import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { sprintf } from 'sprintf-js';
 import { retryAsync } from "./utils.js";
+import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from "./io.js";
 
 const debug = createDebug('cgsn');
 
@@ -52,23 +53,6 @@ export type CgsnExecuteResponse = CgsnBaseResponse<{
 export type CgsnQueryResponse = CgsnBaseResponse<{
 	values: number[]
 }>;
-
-export type CgsnReadResponse = CgsnBaseResponse<{
-	canceled: boolean;
-	buffer: Buffer;
-}>;
-
-export type CgsnWriteResponse = CgsnBaseResponse<{
-	canceled: boolean;
-	written: number;
-}>;
-
-export type CgsnReadWriteOptions = {
-	onProgress?: (cursor: number, total: number, elapsed: number) => void;
-	chunkSize?: number;
-	progressInterval?: number;
-	signal?: AbortSignal | null;
-};
 
 export class CGSN {
 	private readonly port: AsyncSerialPort;
@@ -282,111 +266,62 @@ export class CGSN {
 		return { success: true, values };
 	}
 
-	async readMemory(address: number, length: number, options: CgsnReadWriteOptions = {}): Promise<CgsnReadResponse> {
-		const validOptions = {
-			chunkSize: 512,
-			progressInterval: 500,
-			...options
-		};
-		let start = Date.now();
-		let cursor = 0;
-		let buffer = Buffer.alloc(length);
-		let lastProgressCalled = 0;
-		let canceled = false;
-		while (cursor < buffer.length) {
-			if (validOptions.signal?.aborted) {
-				canceled = true;
-				break;
-			}
-
-			if (!validOptions.progressInterval || (Date.now() - lastProgressCalled > validOptions.progressInterval && cursor > 0)) {
-				validOptions.onProgress && validOptions.onProgress(cursor, buffer.length, Date.now() - start);
-				lastProgressCalled = Date.now();
-			}
-
-			const chunkSize = Math.min(buffer.length - cursor, validOptions.chunkSize);
-			const response = await retryAsync(async () => await this.readMemoryChunk(address + cursor, chunkSize, buffer, cursor), {
-				max: 3,
-				until: (response) => !response.success
-			});
-			if (!response.success)
-				return response;
-			cursor += chunkSize;
+	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<CgsnBaseResponse<IoReadResult>> {
+		try {
+			const result = await ioReadMemory({
+				debug,
+				align: 4,
+				pageSize: 512,
+				maxRetries: 3,
+				read: this.readMemoryChunk.bind(this),
+			}, address, length, options);
+			return { success: true, ...result };
+		} catch (e) {
+			return { success: false, error: e instanceof Error ? e.message : String(e) };
 		}
-
-		validOptions.onProgress && validOptions.onProgress(cursor, buffer.length, Date.now() - start);
-		return { success: true, buffer, canceled };
 	}
 
-	async writeMemory(address: number, buffer: Buffer, options: CgsnReadWriteOptions = {}): Promise<CgsnWriteResponse> {
-		const validOptions = {
-			chunkSize: 128,
-			progressInterval: 500,
-			...options
-		};
-		let start = Date.now();
-		let cursor = 0;
-		let lastProgressCalled = 0;
-		let canceled = false;
-
-		if ((address % 4) != 0)
-			throw new Error(`Address (${address.toString(16)}) is not aligned to 4!`);
-
-		if ((buffer.length % 4) != 0)
-			throw new Error(`Buffer size (${buffer.length}) is not aligned to 4!`);
-
-		while (cursor < buffer.length) {
-			if (validOptions.signal?.aborted) {
-				canceled = true;
-				break;
-			}
-
-			if (!validOptions.progressInterval || (Date.now() - lastProgressCalled > validOptions.progressInterval && cursor > 0)) {
-				validOptions.onProgress && validOptions.onProgress(cursor, buffer.length, Date.now() - start);
-				lastProgressCalled = Date.now();
-			}
-
-			const chunkSize = Math.min(buffer.length - cursor, validOptions.chunkSize);
-			const response = await retryAsync(async () => await this.writeMemoryChunk(address + cursor, chunkSize, buffer, cursor), {
-				max: 3,
-				until: (response) => !response.success
-			});
-			if (!response.success)
-				return response;
-			cursor += chunkSize;
+	async writeMemory(address: number, buffer: Buffer, options: IoReadWriteOptions = {}): Promise<CgsnBaseResponse<IoWriteResult>> {
+		try {
+			const result = await ioWriteMemory({
+				debug,
+				align: 4,
+				pageSize: 128,
+				maxRetries: 3,
+				write: this.writeMemoryChunk.bind(this)
+			}, address, buffer, options);
+			return { success: true, ...result };
+		} catch (e) {
+			return { success: false, error: e instanceof Error ? e.message : String(e) };
 		}
-		validOptions.onProgress && validOptions.onProgress(cursor, buffer.length, Date.now() - start);
-		return { success: true, written: cursor, canceled };
 	}
 
-	async readMemoryChunk(address: number, length: number, buffer: Buffer, bufferOffset: number = 0): Promise<CgsnBaseResponse> {
+	async readMemoryChunk(address: number, length: number, buffer: Buffer, bufferOffset: number = 0): Promise<void> {
 		if (!this.isConnected)
-			return { success: false, error: 'Not connected!' };
+			throw new Error(`Not connected.`);
 		if (length > 512)
 			throw new Error(`Maximum length for one memory reading is 512 bytes.`);
 		const cmd = sprintf("AT+CGSN:%08X,%08X", address , length);
 		const response = await this.atc.sendCommandBinaryResponse(cmd, length + 1, 1000);
 		if (!response.success)
-			return { success: false, error: `AT command failed: ${cmd}` };
+			throw new Error(`AT command failed: ${cmd}`);
 		if (response.binary![0] != 0xA1)
-			return { success: false, error: `Invalid ACK: 0x${response.binary![0].toString(16)}` };
+			throw new Error(`Invalid ACK: 0x${response.binary![0].toString(16)}`);
 		buffer.set(response.binary!.subarray(1), bufferOffset);
-		return { success: true };
 	}
 
-	async writeMemoryChunk(address: number, length: number, buffer: Buffer, bufferOffset: number = 0): Promise<CgsnBaseResponse> {
+	async writeMemoryChunk(address: number, buffer: Buffer): Promise<void> {
 		if (!this.isConnected)
-			return { success: false, error: 'Not connected!' };
-		if (length > 128)
+			throw new Error(`Not connected.`);
+		if (buffer.length > 128)
 			throw new Error(`Maximum length for one memory writing is 128 bytes.`);
-		const hex = buffer.subarray(bufferOffset, bufferOffset + length).toString('hex').toUpperCase();
+		const hex = buffer.toString('hex').toUpperCase();
 		const cmd = sprintf("AT+CGSN*%08X%s", address, hex);
 		const response = await this.atc.sendCommandBinaryResponse(cmd, 1, 1000);
 		if (!response.success)
-			return { success: false, error: `AT command failed: ${cmd}` };
+			throw new Error(`AT command failed: ${cmd}`);
 		if (response.binary![0] != 0xA1)
-			return { success: false, error: `Invalid ACK: 0x${response.binary![0].toString(16)}` };
-		return { success: true };
+			throw new Error(`Invalid ACK: 0x${response.binary![0].toString(16)}`);
 	}
 
 	async disconnect() {

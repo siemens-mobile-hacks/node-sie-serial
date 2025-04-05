@@ -41,6 +41,9 @@ importers:
       '@types/sprintf-js':
         specifier: ^1.1.4
         version: 1.1.4
+      '@types/throttle-debounce':
+        specifier: ^5.0.2
+        version: 5.0.2
       serialport:
         specifier: ^13.0.0
         version: 13.0.0
@@ -386,6 +389,9 @@ packages:
 
   '@types/sprintf-js@1.1.4':
     resolution: {integrity: sha512-aWK1reDYWxcjgcIIPmQi3u+OQDuYa9b+lr6eIsGWrekJ9vr1NSjr4Eab8oQ1iKuH1ltFHpXGyerAv1a3FMKxzQ==}
+
+  '@types/throttle-debounce@5.0.2':
+    resolution: {integrity: sha512-pDzSNulqooSKvSNcksnV72nk8p7gRqN8As71Sp28nov1IgmPKWbOEIwAWvBME5pPTtaXJAvG3O4oc76HlQ4kqQ==}
 
   '@vitest/expect@3.0.8':
     resolution: {integrity: sha512-Xu6TTIavTvSSS6LZaA3EebWFr6tsoXPetOWNMOlc7LO88QVVBwq2oQWBoDiLCN6YTvNYsGSjqOO8CAdjom5DCQ==}
@@ -854,6 +860,8 @@ snapshots:
       undici-types: 6.20.0
 
   '@types/sprintf-js@1.1.4': {}
+
+  '@types/throttle-debounce@5.0.2': {}
 
   '@vitest/expect@3.0.8':
     dependencies:

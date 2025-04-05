@@ -6,7 +6,7 @@ const IGNITION_OFF_PERIOD = 150;
 
 const CPU_NAMES: Record<number, string> = {
 	0xB0:	'PMB8875 (SGold)',
-	0xC0:	'PMB8876 (SGold)',
+	0xC0:	'PMB8876 (SGold2)',
 };
 
 const CPU_TYPES: Record<number, string> = {

@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { SerialPort } from "serialport";
 import { AsyncSerialPort, ChaosLoader } from "../src/index.js";
+import { hexdump } from "../src/utils.js";
 
 const argv = parseArgs({
 	options: {
@@ -34,10 +35,17 @@ await port.open();
 
 const chaos = new ChaosLoader(port);
 await chaos.connect();
-await chaos.unlock();
+await chaos.activate();
 await chaos.ping();
 await chaos.setSpeed(1625000);
 await chaos.ping();
+
+// test reading from flash
+await chaos.readMemory(0xA0000000, 1024 * 1024 * 64, {
+	onProgress({ percent, speed, remaining }) {
+		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} kB/s | ETA: ${remaining.toFixed(2)}s`);
+	}
+});
 
 /*
 // test writing to ram

@@ -70,10 +70,8 @@ if (await cgsn.connect()) {
 await cgsn.setBestBaudRate(parseInt(argv.baudrate));
 
 const result = await cgsn.readMemory(addr, size, {
-	onProgress(cursor, total, elapsed) {
-		let speed = cursor / (elapsed / 1000) || 0;
-		let estimated = speed ? Math.round((total - cursor) / speed) : 0;
-		console.log(`read: ${Math.round(cursor / total * 100)}% | ${Math.round(elapsed / 1000)} s | speed: ${Math.round(speed / 1024)} kB/s | estimated time: ${estimated}`);
+	onProgress({ percent, speed, remaining }) {
+		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} KB/s | ETA: ${remaining.toFixed(2)}s`);
 	}
 });
 

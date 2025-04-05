@@ -43,12 +43,13 @@ if (await cgsn.connect()) {
 await cgsn.setBestBaudRate();
 
 await cgsn.readMemory(0xA0000000, 1024, {
-	onProgress: (cursor, total, elapsed) => {
-		const speed = cursor / (elapsed / 1000) || 0;
-		const estimated = speed ? Math.round((total - cursor) / speed) : 0;
-		console.log(`read: ${Math.round(cursor / total * 100)}% | ${Math.round(elapsed / 1000)} s | speed: ${Math.round(speed / 1024)} kB/s | estimated time: ${estimated}`);
+	onProgress({ percent, speed, remaining }) {
+		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} KB/s | ETA: ${remaining.toFixed(2)}s`);
 	}
 });
+
+await cgsn.writeMemory(0x82000, Buffer.from([0xCA, 0xFE, 0xBA, 0xBE]));
+console.log(await cgsn.readMemory(0x82000, 8));
 
 await cgsn.disconnect();
 await port.close();

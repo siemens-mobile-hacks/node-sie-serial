@@ -10,15 +10,30 @@ const port = new AsyncSerialPort(new SerialPort({
 await port.open();
 
 const dwd = new DWD(port);
+
+/*
+const possibleKeys = await dwd.bruteforceKey2({
+	onProgress({ percent, speed, remaining }) {
+		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${speed.toFixed(2)} keys/s | ETA: ${remaining.toFixed(2)}s`);
+	}
+});
+const foundKeys: DWDKeys[] = [];
+for (const key2 of possibleKeys) {
+	console.log(sprintf("Bruteforce key1 for key2=%04X\n", key2));
+	const keys = await dwd.bruteforceKey1(key2);
+	if (keys != null)
+		foundKeys.push(keys);
+}
+console.log(foundKeys);
+*/
+
 dwd.setKeys("panasonic");
 await dwd.connect();
 const result = await dwd.readMemory(0xA0000000, 64 * 1024 * 1024, {
-	onProgress({ total, cursor, elapsed }) {
-		const percent = (cursor / total) * 100;
-		const speed = cursor / (elapsed / 1000);
-		const remaining = (total - cursor) / speed;
+	onProgress({ percent, speed, remaining }) {
 		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} KB/s | ETA: ${remaining.toFixed(2)}s`);
 	}
 });
 fs.writeFileSync("/tmp/ff.bin", result.buffer);
+await dwd.disconnect();
 await port.close();

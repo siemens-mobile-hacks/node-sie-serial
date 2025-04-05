@@ -87,8 +87,8 @@ for (let i = 1; i <= displaysCnt; i++) {
 	console.log(bufferInfo);
 
 	const result = await bus.getDisplayBuffer(i, {
-		onProgress: ({ cursor, total, elapsed }) => {
-			console.log(`${cursor / total * 100}%`, `${elapsed} s.`);
+		onProgress({ percent, speed, remaining }) {
+			console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} KB/s | ETA: ${remaining.toFixed(2)}s`);
 		}
 	});
 	fs.writeFileSync("screen.data", result.buffer);

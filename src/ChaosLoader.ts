@@ -1,9 +1,10 @@
-import fs from 'fs';
 import createDebug from 'debug';
 import { AsyncSerialPort } from "./AsyncSerialPort.js";
 import { loadBootCode, LoadBootCodeOptions } from "./BSL.js";
 import { sprintf } from 'sprintf-js';
 import { decodeCString } from './utils.js';
+import { CHAOS_BOOT_CODE } from "./chaos.bin.js";
+import { IoFlashRegion, ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from "./io.js";
 
 const debug = createDebug("chaos");
 
@@ -58,12 +59,6 @@ const BAUDRATES: Record<number, number> = {
 	3250000:	9,
 };
 
-export type ChaosFlashRegion = {
-	addr: number;
-	size: number;
-	eraseSize: number;
-};
-
 export type ChaosPhoneInfo = {
 	model: string;
 	vendor: string;
@@ -76,38 +71,13 @@ export type ChaosPhoneInfo = {
 	flashSize: number;
 	writeBufferSize: number;
 	flashRegionsNum: number;
-	regions: ChaosFlashRegion[];
-};
-
-export type ChaosReadWriteOptions = {
-	onProgress?: (progress: ChaosReadWriteProgress) => void;
-	chunkSize?: number;
-	progressInterval?: number;
-	signal?: AbortSignal | null;
-};
-
-export type ChaosReadWriteProgress = {
-	pageAddr?: number;
-	pageSize?: number;
-	cursor: number;
-	total: number;
-	elapsed: number;
-};
-
-export type ChaosWriteResult = {
-	canceled: boolean;
-	written: number;
-};
-
-export type ChaosReadResult = {
-	canceled: boolean;
-	buffer: Buffer;
+	regions: IoFlashRegion[];
 };
 
 export class ChaosLoaderError extends Error {
 	constructor(error: string) {
-		super(error)
-		debug(`[ChaosLoaderError] ${error}`)
+		super(error);
+		debug(error);
 	}
 }
 
@@ -117,6 +87,7 @@ export class ChaosLoader {
 	private heartbeatTimer?: NodeJS.Timeout;
 	private phoneInfo?: ChaosPhoneInfo;
 	private lastGoodPageSize: number = 0;
+	private pageReadWriteStart: number = 0;
 
 	static getSupportedBaudrates(): number[] {
 		return Object.keys(BAUDRATES).map(parseInt);
@@ -127,8 +98,7 @@ export class ChaosLoader {
 	}
 
 	async connect(options: LoadBootCodeOptions = {}): Promise<void> {
-		const bootCode = fs.readFileSync("../pmb887x-dev/boot/chaos_x85.bin");
-		const bootStatus = await loadBootCode(this.port, bootCode, options);
+		const bootStatus = await loadBootCode(this.port, CHAOS_BOOT_CODE, options);
 		if (!bootStatus.success)
 			throw new ChaosLoaderError(bootStatus.error);
 
@@ -161,9 +131,9 @@ export class ChaosLoader {
 		await this.port.write(Buffer.from([CMD.HEARTBEAT]));
 	}
 
-	async unlock(): Promise<void> {
+	async activate(): Promise<void> {
 		if (!await this.ping())
-			throw new ChaosLoaderError(`ERROR: Can't unlock chaos loader!`);
+			throw new ChaosLoaderError(`ERROR: Can't activate chaos loader!`);
 
 		await this.port.write(Buffer.from([CMD.GET_INFO]));
 
@@ -301,96 +271,36 @@ export class ChaosLoader {
 		return response == 0xFF;
 	}
 
-	async writeMemory(addr: number, buffer: Buffer, options: ChaosReadWriteOptions = {}): Promise<ChaosWriteResult> {
-		const validOptions = {
-			progressInterval: 500,
-			...options
-		};
+	async writeMemory(address: number, buffer: Buffer, options: IoReadWriteOptions = {}): Promise<IoWriteResult> {
+		debug(sprintf("Writing memory: %08X-%08X", address, address + buffer.length - 1));
+		debug(sprintf("Initial page size: 0x%02X", WRITE_PAGE_SIZE_START));
 
 		this.stopHeartbeatTimer();
 
-		let pageSize = WRITE_PAGE_SIZE_START;
-		let bytesWritten = 0;
-		let errorsCount = 0;
-		let canceled = false;
-		let lastProgressCalled = 0;
-		const start = Date.now();
-
-		debug(sprintf("Writing memory: %08X-%08X", addr, addr + buffer.length - 1));
-		debug(sprintf("Initial page size: 0x%02X", pageSize));
-
-		let writeTryCount = 0;
-		while (bytesWritten < buffer.length) {
-			const chunkSize = Math.min(pageSize, buffer.length - bytesWritten);
-			const pageWriteStart = Date.now();
-
-			if (validOptions.signal?.aborted) {
-				canceled = true;
-				debug("Writing canceled by user.");
-				break;
+		const result = await ioWriteMemory({
+			debug,
+			maxRetries: 0xFFFFFFFF,
+			write: this.writeMemoryPage.bind(this),
+			onError: this.onReadWriteError.bind(this),
+			align: 1,
+			pageSize: WRITE_PAGE_SIZE_START,
+			adaptivePageSize: {
+				smallPageSize: WRITE_PAGE_SIZE_MIN,
+				smallPageRetryCount: WRITE_PAGE_SIZE_TRY_COUNT,
+				bigPageSize: WRITE_BIG_PAGE_SIZE_MIN,
+				bigPageRetryCount: WRITE_BIG_PAGE_SIZE_TRY_COUNT
 			}
-
-			if (!validOptions.progressInterval || (Date.now() - lastProgressCalled > validOptions.progressInterval && bytesWritten > 0)) {
-				validOptions.onProgress && validOptions.onProgress({
-					pageAddr: addr + bytesWritten,
-					pageSize: chunkSize,
-					cursor: bytesWritten,
-					total: buffer.length,
-					elapsed: Date.now() - start
-				});
-				lastProgressCalled = Date.now();
-			}
-
-			if (await this.writeMemoryChunk(addr + bytesWritten, buffer.subarray(bytesWritten, bytesWritten + chunkSize))) {
-				bytesWritten += chunkSize;
-				writeTryCount = 0;
-			} else {
-				errorsCount++;
-
-				while (Date.now() - pageWriteStart <= WRITE_PAGE_TIMEOUT)
-					await this.heartbeat();
-
-				let phoneIsAlive = false;
-				for (let i = 0; i < 16; i++) {
-					await this.heartbeat();
-					if (await this.ping()) {
-						phoneIsAlive = true;
-						break;
-					}
-				}
-
-				this.stopHeartbeatTimer();
-
-				if (!phoneIsAlive)
-					throw new ChaosLoaderError("Phone connection is lost!");
-
-				if (buffer.length - bytesWritten > WRITE_PAGE_SIZE_MIN) {
-					const maxWriteTries = pageSize >= WRITE_BIG_PAGE_SIZE_MIN ? WRITE_BIG_PAGE_SIZE_TRY_COUNT : WRITE_PAGE_SIZE_TRY_COUNT;
-					writeTryCount++;
-					if (writeTryCount >= maxWriteTries) {
-						writeTryCount = 0;
-						if (pageSize > WRITE_PAGE_SIZE_MIN) {
-							pageSize = pageSize / 2;
-							debug(sprintf("Decreasing page size: 0x%02X", pageSize));
-						}
-					}
-				}
-			}
-		}
+		}, address, buffer, options);
 
 		this.startHeartbeatTimer();
 
-		validOptions.onProgress && validOptions.onProgress({
-			cursor: bytesWritten,
-			total: buffer.length,
-			elapsed: Date.now() - start
-		});
-
-		return { written: bytesWritten, canceled };
+		return result;
 	}
 
-	async writeMemoryChunk(addr: number, buffer: Buffer): Promise<boolean> {
+	private async writeMemoryPage(addr: number, buffer: Buffer): Promise<void> {
 		debug(sprintf("Writing page %08X-%08X", addr, addr + buffer.length - 1));
+
+		this.pageReadWriteStart = Date.now();
 
 		let chk = 0;
 		for (let i = 0; i < buffer.length; i++)
@@ -407,116 +317,49 @@ export class ChaosLoader {
 
 		const response = await this.port.read(2, WRITE_PAGE_TIMEOUT);
 		if (!response) {
-			debug(`ERROR: memory write timeout!`);
-			return false;
+			throw new ChaosLoaderError(`Memory write timeout!`);
 		} else if (response.length != 2) {
-			debug(`ERROR: received unexpected bytes count (expected: 2, received: ${response.length})`);
-			return false;
+			throw new ChaosLoaderError(`Received unexpected bytes count (expected: 2, received: ${response.length})`);
 		}
 
 		const status = response.readUInt16LE(0);
 		if (status == RESPONSES.CHECKSUM_ERROR) {
-			debug(`ERROR: written data is corrupted`);
-			return false;
+			throw new ChaosLoaderError(`Written data is corrupted`);
 		} else if (status != RESPONSES.OK) {
-			debug(sprintf(`ERROR: invalid response: %04X`, status));
-			return false;
+			throw new ChaosLoaderError(sprintf(`Invalid response: %04X`, status));
 		}
-
-		return true;
 	}
 
-	async readMemory(addr: number, size: number, options: ChaosReadWriteOptions = {}): Promise<ChaosReadResult> {
-		const validOptions = {
-			progressInterval: 500,
-			...options
-		};
-		const buffer = Buffer.alloc(size);
+	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<IoReadResult> {
+		debug(sprintf("Reading memory: %08X-%08X", address, address + length - 1));
+		debug(sprintf("Initial page size: 0x%02X", READ_PAGE_SIZE_START));
 
 		this.stopHeartbeatTimer();
 
-		let pageSize = READ_PAGE_SIZE_START;
-		let bytesRead = 0;
-		let errorsCount = 0;
-		let canceled = false;
-		let lastProgressCalled = 0;
-		const start = Date.now();
-
-		debug(sprintf("Reading memory: %08X-%08X", addr, addr + size - 1));
-		debug(sprintf("Initial page size: 0x%02X", pageSize));
-
-		let readTryCount = 0;
-		while (bytesRead < size) {
-			const chunkSize = Math.min(pageSize, size - bytesRead);
-			const pageReadStart = Date.now();
-
-			if (validOptions.signal?.aborted) {
-				canceled = true;
-				debug("Reading canceled by user.");
-				break;
+		const result = await ioReadMemory({
+			debug,
+			maxRetries: 0xFFFFFFFF,
+			read: this.readMemoryPage.bind(this),
+			onError: this.onReadWriteError.bind(this),
+			align: 1,
+			pageSize: READ_PAGE_SIZE_START,
+			adaptivePageSize: {
+				smallPageSize: READ_PAGE_SIZE_MIN,
+				smallPageRetryCount: READ_PAGE_SIZE_TRY_COUNT,
+				bigPageSize: READ_BIG_PAGE_SIZE_MIN,
+				bigPageRetryCount: READ_BIG_PAGE_SIZE_TRY_COUNT
 			}
-
-			if (!validOptions.progressInterval || (Date.now() - lastProgressCalled > validOptions.progressInterval && bytesRead > 0)) {
-				validOptions.onProgress && validOptions.onProgress({
-					pageAddr: addr + bytesRead,
-					pageSize: chunkSize,
-					cursor: bytesRead,
-					total: buffer.length,
-					elapsed: Date.now() - pageReadStart
-				});
-				lastProgressCalled = Date.now();
-			}
-
-			if (await this.readMemoryChunk(addr + bytesRead, chunkSize, buffer, bytesRead)) {
-				bytesRead += chunkSize;
-				readTryCount = 0;
-			} else {
-				errorsCount++;
-
-				while (Date.now() - pageReadStart <= READ_PAGE_TIMEOUT)
-					await this.heartbeat();
-
-				let phoneIsAlive = false;
-				for (let i = 0; i < 16; i++) {
-					await this.heartbeat();
-					if (await this.ping()) {
-						phoneIsAlive = true;
-						break;
-					}
-				}
-
-				this.stopHeartbeatTimer();
-
-				if (!phoneIsAlive)
-					throw new ChaosLoaderError("Phone connection is lost!");
-
-				if (size - bytesRead > READ_PAGE_SIZE_MIN) {
-					const maxReadTries = pageSize >= READ_BIG_PAGE_SIZE_MIN ? READ_BIG_PAGE_SIZE_TRY_COUNT : READ_PAGE_SIZE_TRY_COUNT;
-					readTryCount++;
-					if (readTryCount >= maxReadTries) {
-						readTryCount = 0;
-						if (pageSize > READ_PAGE_SIZE_MIN) {
-							pageSize = pageSize / 2;
-							debug(sprintf("Decreasing page size: 0x%02X", pageSize));
-						}
-					}
-				}
-			}
-		}
+		}, address, length, options);
 
 		this.startHeartbeatTimer();
 
-		validOptions.onProgress && validOptions.onProgress({
-			cursor: bytesRead,
-			total: buffer.length,
-			elapsed: Date.now() - start
-		});
-
-		return { buffer, canceled };
+		return result;
 	}
 
-	async readMemoryChunk(addr: number, size: number, buffer: Buffer, bufferOffset: number = 0) {
+	private async readMemoryPage(addr: number, size: number, buffer: Buffer, bufferOffset: number = 0) {
 		debug(sprintf("Reading page %08X-%08X", addr, addr + size - 1));
+
+		this.pageReadWriteStart = Date.now();
 
 		const cmd = Buffer.alloc(9);
 		cmd.writeUInt8(CMD.READ_FLASH, 0);
@@ -526,32 +369,45 @@ export class ChaosLoader {
 
 		const response = await this.port.read(size + 4, READ_PAGE_TIMEOUT);
 		if (!response) {
-			debug(`ERROR: flash read timeout!`);
-			return false;
+			throw new ChaosLoaderError(`Flash read timeout!`);
 		} else if (response.length != size + 4) {
-			debug(`ERROR: received unexpected bytes count (expected: ${size + 5}, received: ${response.length})`);
-			return false;
+			throw new ChaosLoaderError(`Received unexpected bytes count (expected: ${size + 5}, received: ${response.length})`);
 		}
 
 		const status = response.readUInt16LE(size);
 		const receivedChk = response.readUInt16LE(size + 2);
 
-		if (status != RESPONSES.OK) {
-			debug(sprintf(`ERROR: invalid response: %04X`, status));
-			return false;
-		}
+		if (status != RESPONSES.OK)
+			throw new ChaosLoaderError(sprintf(`Invalid response: %04X`, status));
 
 		let chk = 0;
 		for (let i = 0; i < size; i++)
 			chk ^= response[i];
 
 		if (chk != receivedChk) {
-			debug(sprintf(`ERROR: received data is corrupted (CHK %04X != %04X)`, receivedChk, chk));
-			return false;
+			throw new ChaosLoaderError(sprintf(`Received data is corrupted (CHK %04X != %04X)`, receivedChk, chk));
 		}
 
 		response.copy(buffer, bufferOffset, 0, size);
-		return true;
+	}
+
+	private async onReadWriteError(): Promise<void> {
+		while (Date.now() - this.pageReadWriteStart <= READ_PAGE_TIMEOUT)
+			await this.heartbeat();
+
+		let phoneIsAlive = false;
+		for (let i = 0; i < 16; i++) {
+			await this.heartbeat();
+			if (await this.ping()) {
+				phoneIsAlive = true;
+				break;
+			}
+		}
+
+		this.stopHeartbeatTimer();
+
+		if (!phoneIsAlive)
+			throw new ChaosLoaderError("Phone connection is lost!");
 	}
 
 	getPhoneInfo(): ChaosPhoneInfo {
