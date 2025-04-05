@@ -1,7 +1,7 @@
 import { AsyncSerialPort } from "../src/index.js";
 import { SerialPort } from "serialport";
 import { SerialPortStream } from '@serialport/stream';
-import { SocketBinding, SocketBindingInterface } from 'serialport-bindings-webserial';
+import { SocketBinding, SocketBindingInterface } from 'serialport-bindings-socket';
 
 export async function openPort(path: string, baudRate: number): Promise<AsyncSerialPort> {
 	if (path.match(/^(tcp|unix)/)) {
