@@ -1,12 +1,32 @@
-import { AsyncSerialPort, DWD } from "../src/index.js";
-import { SerialPort } from "serialport";
+import { DWD } from "../src/index.js";
 import fs from "fs";
+import { openPort } from "./utils.js";
+import { parseArgs } from "node:util";
 
-const port = new AsyncSerialPort(new SerialPort({
-	path: "/dev/ttyACM0",
-	baudRate: 115200,
-	autoOpen: false
-}));
+const { values: argv } = parseArgs({
+	options: {
+		port: {
+			type: "string",
+			default: "/dev/ttyACM0"
+		},
+		help: {
+			type: "boolean",
+			short: "h",
+			default: false
+		},
+		usage: {
+			type: "boolean",
+			default: false
+		}
+	}
+});
+
+if (argv.help || argv.usage) {
+	console.log(`USAGE: dwd.js --port /dev/ttyACM0`);
+	process.exit(0);
+}
+
+const port = await openPort(argv.port, 115200);
 await port.open();
 
 const dwd = new DWD(port);

@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
-import { AsyncSerialPort, AtChannel } from "../src/index.js";
-import { SerialPort } from "serialport";
+import { AtChannel } from "../src/index.js";
+import { openPort } from "./utils.js";
 
 const { values: argv } = parseArgs({
 	options: {
@@ -25,11 +25,7 @@ if (argv.help || argv.usage) {
 	process.exit(0);
 }
 
-const port = new AsyncSerialPort(new SerialPort({
-	path: argv.port,
-	baudRate: 115200,
-	autoOpen: false
-}));
+const port = await openPort(argv.port, 115200);
 await port.open();
 
 const atc = new AtChannel(port);

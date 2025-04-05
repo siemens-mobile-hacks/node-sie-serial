@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { sprintf } from "sprintf-js";
-import { AsyncSerialPort, CGSN } from "../src/index.js";
-import { SerialPort } from "serialport";
+import { CGSN } from "../src/index.js";
+import { openPort } from "./utils.js";
 
 type MMUTableRow = {
 	type: number;
@@ -38,11 +38,7 @@ if (argv.help || argv.usage) {
 	process.exit(0);
 }
 
-const port = new AsyncSerialPort(new SerialPort({
-	path: argv.port,
-	baudRate: 115200,
-	autoOpen: false
-}));
+const port = await openPort(argv.port, 115200);
 await port.open();
 const cgsn = new CGSN(port);
 

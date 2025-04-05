@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { parseArgs } from 'node:util';
-import { AsyncSerialPort, loadBootCode } from "../src/index.js";
-import { SerialPort } from "serialport";
+import { loadBootCode } from "../src/index.js";
+import { openPort } from "./utils.js";
 
 const SPECIAL_BOOTS: Record<string, Buffer> = {
 	BurninMode: Buffer.from(
@@ -72,11 +72,7 @@ if ((argv.boot in SPECIAL_BOOTS)) {
 	bootCode = fs.readFileSync(argv.boot);
 }
 
-const port = new AsyncSerialPort(new SerialPort({
-	path: argv.port,
-	baudRate: 115200,
-	autoOpen: false
-}));
+const port = await openPort(argv.port, 115200);
 await port.open();
 
 const result = await loadBootCode(port, bootCode);

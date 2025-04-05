@@ -1,8 +1,8 @@
 import fs from 'fs';
 import { parseArgs } from 'node:util';
 import { sprintf } from 'sprintf-js';
-import { AsyncSerialPort, CGSN } from "../src/index.js";
-import { SerialPort } from "serialport";
+import { CGSN } from "../src/index.js";
+import { openPort } from "./utils.js";
 
 const { values: argv } = parseArgs({
 	options: {
@@ -52,11 +52,7 @@ if (isNaN(addr) || isNaN(size)) {
 	process.exit(1);
 }
 
-const port = new AsyncSerialPort(new SerialPort({
-	path: argv.port,
-	baudRate: 115200,
-	autoOpen: false
-}));
+const port = await openPort(argv.port, 115200);
 await port.open();
 const cgsn = new CGSN(port);
 

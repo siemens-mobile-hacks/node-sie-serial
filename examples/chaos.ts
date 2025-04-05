@@ -1,7 +1,6 @@
 import { parseArgs } from 'node:util';
-import { SerialPort } from "serialport";
-import { AsyncSerialPort, ChaosLoader } from "../src/index.js";
-import { hexdump } from "../src/utils.js";
+import { ChaosLoader } from "../src/index.js";
+import { openPort } from "./utils.js";
 
 const argv = parseArgs({
 	options: {
@@ -26,11 +25,7 @@ if (argv.values.help || argv.values.usage) {
 	process.exit(0);
 }
 
-const port = new AsyncSerialPort(new SerialPort({
-	path: argv.values.port,
-	baudRate: 115200,
-	autoOpen: false
-}));
+const port = await openPort(argv.values.port, 115200);
 await port.open();
 
 const chaos = new ChaosLoader(port);
