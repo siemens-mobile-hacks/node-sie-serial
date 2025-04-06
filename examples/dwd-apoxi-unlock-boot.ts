@@ -3,6 +3,7 @@ import fs from "fs";
 import { openPort } from "./utils.js";
 import { parseArgs } from "node:util";
 import { sprintf } from "sprintf-js";
+import { retryAsyncOnError } from "../src/utils.js";
 
 const PATCHER_ADDR = 0xB0FC0000;
 const TCM_START = 0xFFFF0000;
@@ -15,6 +16,22 @@ const PARAM_RESPONSE_FLASH_ID = PATCHER_END - 12;
 const BOOT_MODE = 0xA000000C;
 
 const EBU_ADDRSEL1 = 0xF0000088;
+
+enum PatchResponseCode {
+	SUCCESS = 0,
+	BOOT_ALREADY_OPEN = -1,
+	UNKNOWN_FLASH = -2,
+	FLASH_BUSY = -3,
+	ERASE_ERROR = -4,
+	PROGRAM_ERROR = -5,
+	ADDR_NOT_ALIGNED = -6,
+	FLASH_REGION_NOT_FOUND = -7,
+	FLASH_REGION_TOO_BIG = -8,
+	INVALID_FLASH_REGIONS = -9,
+	INVALID_FLASH_REGION_COUNT = -10,
+	UNSUPPORTED_FLASH = -11,
+	FLASH_NOT_FOUND = -12,
+};
 
 const { values: argv } = parseArgs({
 	options: {
@@ -84,15 +101,21 @@ if (check.buffer.toString("hex") != code.toString("hex")) {
 
 await dwd.writeMemory(PRAM_IRQ_HANDLER, uint32(PATCHER_ADDR));
 
-const responseCode = (await dwd.readMemory(PARAM_RESPONSE_CODE, 4)).buffer.readUInt32LE(0);
-const responseFlashId = (await dwd.readMemory(PARAM_RESPONSE_FLASH_ID, 4)).buffer.readUInt32LE(0);
+await retryAsyncOnError(async () => {
+	console.log("Waiting for done...");
 
-console.log(sprintf("Code: %08X (%s)", responseCode, responseCode == 0 ? "SUCCESS" : "ERROR"));
-console.log(sprintf("FlashID: %08X", responseFlashId));
+	const responseCode = (await dwd.readMemory(PARAM_RESPONSE_CODE, 4)).buffer.readInt32LE(0);
+	const responseFlashId = (await dwd.readMemory(PARAM_RESPONSE_FLASH_ID, 4)).buffer.readUInt32LE(0);
 
-if (responseCode == 0) {
-	console.log("Boot patched, now reboot phone.");
-}
+	console.log(sprintf("Code: %08X (%s)", responseCode, PatchResponseCode[responseCode]));
+	console.log(sprintf("FlashID: %08X", responseFlashId));
+
+	if (responseCode == 0) {
+		console.log("Boot patched, now reboot phone.");
+	}
+
+	await new Promise((resolve) => setTimeout(resolve, 1000));
+}, { max: 30 });
 
 await port.close();
 
