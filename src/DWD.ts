@@ -2,15 +2,24 @@ import createDebug from 'debug';
 import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { sprintf } from "sprintf-js";
 import { hexdump } from "./utils.js";
-import { ioProgressTracker, ioReadMemory, IoReadResult, IoReadWriteOptions, IoReadWriteProgress } from "./io.js";
+import {
+	ioProgressTracker,
+	ioReadMemory,
+	IoReadResult,
+	IoReadWriteOptions,
+	IoReadWriteProgress, ioWriteMemory,
+	IoWriteResult
+} from "./io.js";
 
 const debug = createDebug('dwd');
+const debugTrx = createDebug('dwd:trx');
 
 const RAND1 = 5500; // (rand() % 60000) + 5500
 const RAND2 = 5500; // (rand() % 60000) + 5500
 const RAND3 = 5500; // (rand() % 60000) + 5500
 const RAND4 = 0; // rand()
 const MAX_MEMORY_READ_CHUNK = 230;
+const MAX_MEMORY_WRITE_CHUNK = 226;
 
 enum FrameType {
 	NO_RESP = 0x00,
@@ -20,6 +29,8 @@ enum FrameType {
 	CONNECT2_RESP = 0x56,
 	READ_MEMORY_REQ = 0x76,
 	READ_MEMORY_RESP = 0x77,
+	WRITE_MEMORY_REQ = 0x78,
+	WRITE_MEMORY_RESP = 0x79,
 	SW_RESET_REQ = 0xAD,
 }
 
@@ -54,6 +65,8 @@ const FRAME_SIZE = {
 	[FrameType.CONNECT2_RESP]: 6,
 	[FrameType.READ_MEMORY_REQ]: 8,
 	[FrameType.READ_MEMORY_RESP]: 0,
+	[FrameType.WRITE_MEMORY_REQ]: 8,
+	[FrameType.WRITE_MEMORY_RESP]: 4,
 	[FrameType.SW_RESET_REQ]: 2
 };
 
@@ -75,7 +88,7 @@ export const DWD_KEYS: Record<string, DWDKeys> = {
 export class DWDError extends Error {
 	constructor(message: string, ...args: any[]) {
 		const errorMessage = sprintf(message, args);
-		debug("ERROR: " + errorMessage);
+		debug(errorMessage);
 		super(errorMessage);
 	}
 }
@@ -85,7 +98,7 @@ export class DWDTimeoutError extends DWDError {
 }
 
 export class DWD {
-	private port: AsyncSerialPort;
+	private readonly port: AsyncSerialPort;
 	private keys: DWDKeys = DWD_KEYS["panasonic"];
 
 	constructor(port: AsyncSerialPort) {
@@ -129,19 +142,42 @@ export class DWD {
 		}, address, length, options)
 	}
 
-	async readMemoryChunk(addr: number, size: number, buffer: Buffer, bufferOffset: number): Promise<void> {
+	async writeMemory(address: number, buffer: Buffer, options: IoReadWriteOptions = {}): Promise<IoWriteResult> {
+		return ioWriteMemory({
+			debug,
+			align: 4,
+			pageSize: 128,
+			maxRetries: 3,
+			write: this.writeMemoryChunk.bind(this)
+		}, address, buffer, options);
+	}
+
+	private async readMemoryChunk(addr: number, size: number, buffer: Buffer, bufferOffset: number): Promise<void> {
 		const request = this.newRequest(FrameType.READ_MEMORY_REQ);
 		request.writeUInt16LE(size, 2);
 		request.writeUInt32LE(addr, 4);
 
 		if (size > MAX_MEMORY_READ_CHUNK)
-			throw new DWDError("readMemory: max size is %d, but requested %d!", MAX_MEMORY_READ_CHUNK, size);
+			throw new DWDError("readMemoryChunk: max size is %d, but requested %d!", MAX_MEMORY_READ_CHUNK, size);
 
 		const response = await this.execCommand(request, FrameType.READ_MEMORY_RESP);
 		if ((response.length - 4) < size)
-			throw new DWDError("readMemory: requested %d bytes, but received only %d!", size, buffer.length);
+			throw new DWDError("readMemoryChunk: requested %d bytes, but received only %d!", size, buffer.length);
 
 		buffer.set(response.subarray(4, 4 + size), bufferOffset);
+	}
+
+	private async writeMemoryChunk(address: number, buffer: Buffer): Promise<void> {
+		const request = this.newRequest(FrameType.WRITE_MEMORY_REQ, buffer.length);
+		request.writeUInt16LE(buffer.length, 2);
+		request.writeUInt32LE(address, 4);
+
+		buffer.copy(request, 8);
+
+		if (buffer.length > MAX_MEMORY_WRITE_CHUNK)
+			throw new DWDError("writeMemoryChunk: max size is %d, but requested %d!", MAX_MEMORY_READ_CHUNK, buffer.length);
+
+		await this.execCommand(request, FrameType.WRITE_MEMORY_RESP);
 	}
 
 	async poweroff(): Promise<void> {
@@ -305,37 +341,38 @@ export class DWD {
 		return buffer;
 	}
 
-	async execCommand(request: Buffer, responseFrameId: FrameType, timeout: number = 0): Promise<Buffer> {
+	async execCommand(request: Buffer, responseFrameId: FrameType, timeout: number = 1000): Promise<Buffer> {
 		const requestFrameId = request.readUInt16LE(0);
 		const expectedRequestLength = FRAME_SIZE[requestFrameId as FrameType];
-		if (request.length != expectedRequestLength) {
+		if (request.length < expectedRequestLength) {
 			throw new DWDError(sprintf("Invalid DWD request frame (%04X) length! (expected: %02X, received: %02X)",
 				requestFrameId, expectedRequestLength, request.length));
 		}
 
-		debug.enabled && debug(sprintf(`[TX] %s`, hexdump(request)));
+		debugTrx.enabled && debugTrx(sprintf(`[TX] %s`, hexdump(request)));
 
 		await this.port.write(encapsulateDWDtoAT(request));
 		const expectedResponseLength = FRAME_SIZE[responseFrameId];
 		if (expectedResponseLength == -1) {
 			return Buffer.alloc(0);
 		} else if (expectedResponseLength == 0) {
-			const frameHeader = await this.port.read(4);
+			const frameHeader = await this.port.read(4, timeout);
 			if (!frameHeader)
 				throw new DWDTimeoutError("DWD command timeout! (header)");
-			debug.enabled && debug(sprintf(`[RX] [header] %s`, hexdump(frameHeader)));
 
 			const receivedResponseFrameId = frameHeader.readUInt16LE(0);
 			if (receivedResponseFrameId != responseFrameId) {
+				debugTrx.enabled && debugTrx(sprintf(`[RX] %s`, hexdump(frameHeader)));
 				throw new DWDError(sprintf("Invalid DWD command (%04X) response frame! (expected: %04X, received: %04X)",
 					requestFrameId, responseFrameId, receivedResponseFrameId));
 			}
 
 			const expectedResponseLength = frameHeader.readUInt16LE(2);
-			const frameBody = await this.port.read(expectedResponseLength);
+			const frameBody = await this.port.read(expectedResponseLength, timeout);
 			if (!frameBody)
 				throw new DWDTimeoutError("DWD command (%04X) timeout! (body)", requestFrameId);
-			debug.enabled && debug(sprintf(`[RX] [body] %s`, hexdump(frameHeader)));
+
+			debugTrx.enabled && debugTrx(sprintf(`[RX] %s %s`, hexdump(frameHeader), hexdump(frameBody)));
 
 			if (frameBody.length != expectedResponseLength) {
 				throw new DWDError(sprintf("Invalid DWD command (%04X) response frame (%04X) length! (expected: %d, received: %d)",
@@ -347,7 +384,7 @@ export class DWD {
 			const response = await this.port.read(expectedResponseLength, timeout);
 			if (!response)
 				throw new DWDTimeoutError("DWD command (%04X) timeout! (body)", requestFrameId);
-			debug.enabled && debug(sprintf(`[RX] %s`, hexdump(response)));
+			debugTrx.enabled && debugTrx(sprintf(`[RX] %s`, hexdump(response)));
 
 			const receivedResponseFrameId = response.readUInt16LE(0);
 			if (receivedResponseFrameId != responseFrameId) {

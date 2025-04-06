@@ -36,11 +36,14 @@ await chaos.setSpeed(1625000);
 await chaos.ping();
 
 // test reading from flash
-await chaos.readMemory(0xA0000000, 1024 * 1024 * 64, {
+console.time("readMemory");
+const result = await chaos.readMemory(0xA0000000, 1024 * 1024 * 64, {
 	onProgress({ percent, speed, remaining }) {
 		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} kB/s | ETA: ${remaining.toFixed(2)}s`);
 	}
 });
+console.timeEnd("readMemory");
+console.log(result);
 
 /*
 // test writing to ram

@@ -2,6 +2,7 @@ import { DWD } from "../src/index.js";
 import fs from "fs";
 import { openPort } from "./utils.js";
 import { parseArgs } from "node:util";
+import { sprintf } from "sprintf-js";
 
 const { values: argv } = parseArgs({
 	options: {
@@ -49,11 +50,13 @@ console.log(foundKeys);
 
 dwd.setKeys("panasonic");
 await dwd.connect();
-const result = await dwd.readMemory(0xA0000000, 64 * 1024 * 1024, {
+
+const result = await dwd.readMemory(0x00000000, 96 * 1024, {
 	onProgress({ percent, speed, remaining }) {
 		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} KB/s | ETA: ${remaining.toFixed(2)}s`);
 	}
 });
-fs.writeFileSync("/tmp/ff.bin", result.buffer);
+fs.writeFileSync("/tmp/sram.bin", result.buffer);
 await dwd.disconnect();
+
 await port.close();
