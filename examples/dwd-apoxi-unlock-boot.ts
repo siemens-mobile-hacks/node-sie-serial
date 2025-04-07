@@ -118,24 +118,33 @@ const PARAM_OLD_IRQ_HANDLER = PATCHER_ADDR + 4;
 const PARAM_RESPONSE_CODE = PATCHER_ADDR + 8;
 const PARAM_RESPONSE_FLASH_ID = PATCHER_ADDR + 12;
 
-await dwd.writeMemory(PARAM_OLD_IRQ_HANDLER, uint32(oldIrqHandler));
-await dwd.writeMemory(PRAM_IRQ_HANDLER, uint32(PATCHER_ADDR));
+for (let i = 0; i < 30; i++) {
+	console.log("Running patcher...");
+	await dwd.writeMemory(PARAM_OLD_IRQ_HANDLER, uint32(oldIrqHandler));
+	await dwd.writeMemory(PRAM_IRQ_HANDLER, uint32(PATCHER_ADDR));
 
-await retryAsyncOnError(async () => {
-	console.log("Waiting for done...");
+	let responseCode: number = PatchResponseCode.UNKNOWN;
+	let responseFlashId: number = 0;
 
-	const responseCode = (await dwd.readMemory(PARAM_RESPONSE_CODE, 4)).buffer.readInt32LE(0);
-	const responseFlashId = (await dwd.readMemory(PARAM_RESPONSE_FLASH_ID, 4)).buffer.readUInt32LE(0);
+	await retryAsyncOnError(async () => {
+		console.log("Waiting for done...");
 
-	console.log(sprintf("Code: %d (%s)", responseCode, PatchResponseCode[responseCode]));
-	console.log(sprintf("FlashID: %08X", responseFlashId));
+		responseCode = (await dwd.readMemory(PARAM_RESPONSE_CODE, 4)).buffer.readInt32LE(0);
+		responseFlashId = (await dwd.readMemory(PARAM_RESPONSE_FLASH_ID, 4)).buffer.readUInt32LE(0);
 
-	if (responseCode == 0) {
-		console.log("Boot patched, now reboot phone.");
-	}
+		console.log(sprintf("Code: %d (%s)", responseCode, PatchResponseCode[responseCode]));
+		console.log(sprintf("FlashID: %08X", responseFlashId));
 
-	await new Promise((resolve) => setTimeout(resolve, 1000));
-}, { max: 30 });
+		if (responseCode == PatchResponseCode.SUCCESS) {
+			console.log("Boot patched, now reboot phone.");
+		}
+
+		await new Promise((resolve) => setTimeout(resolve, 1000));
+	}, { max: 30 });
+
+	if (!(responseCode == PatchResponseCode.FLASH_NOT_FOUND || responseCode == PatchResponseCode.FLASH_BUSY))
+		break;
+}
 
 await port.close();
 
