@@ -32,6 +32,9 @@ importers:
       '@serialport/stream':
         specifier: ^13.0.0
         version: 13.0.0
+      '@sie-js/creampie':
+        specifier: ^1.0.2
+        version: 1.0.2
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -377,6 +380,9 @@ packages:
   '@serialport/stream@13.0.0':
     resolution: {integrity: sha512-F7xLJKsjGo2WuEWMSEO1SimRcOA+WtWICsY13r0ahx8s2SecPQH06338g28OT7cW7uRXI7oEQAk62qh5gHJW3g==}
     engines: {node: '>=20.0.0'}
+
+  '@sie-js/creampie@1.0.2':
+    resolution: {integrity: sha512-ljJxZI8lQ58nZNePrdnWoLWfDllk4xZEm2lCqpXUaZ5fyf7qBWsBh7tDWD8usIdkDKzKUTySpW9vaLaCm6t2BA==}
 
   '@types/debug@4.1.12':
     resolution: {integrity: sha512-vIChWdVG3LG1SMxEvI/AK+FWJthlrqlTu7fbrlywTkkaONwk/UAGaULXRlf8vkzFBLVm0zkMdCquhL5aOjhXPQ==}
@@ -852,6 +858,8 @@ snapshots:
       debug: 4.4.0
     transitivePeerDependencies:
       - supports-color
+
+  '@sie-js/creampie@1.0.2': {}
 
   '@types/debug@4.1.12':
     dependencies:

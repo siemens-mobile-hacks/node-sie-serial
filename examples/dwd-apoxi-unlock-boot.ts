@@ -4,15 +4,10 @@ import { openPort } from "./utils.js";
 import { parseArgs } from "node:util";
 import { sprintf } from "sprintf-js";
 import { retryAsyncOnError } from "../src/utils.js";
+import { loadELF } from "@sie-js/creampie";
 
-const PATCHER_ADDR = 0xB0FC0000;
 const TCM_START = 0xFFFF0000;
-const PATCHER_END = PATCHER_ADDR + 1024 * 2;
-
 const PRAM_IRQ_HANDLER = TCM_START + 0x38;
-const PARAM_OLD_IRQ_HANDLER = PATCHER_END - 4;
-const PARAM_RESPONSE_CODE = PATCHER_END - 8;
-const PARAM_RESPONSE_FLASH_ID = PATCHER_END - 12;
 const BOOT_MODE = 0xA000000C;
 
 const EBU_ADDRSEL1 = 0xF0000088;
@@ -31,7 +26,8 @@ enum PatchResponseCode {
 	INVALID_FLASH_REGION_COUNT = -10,
 	UNSUPPORTED_FLASH = -11,
 	FLASH_NOT_FOUND = -12,
-};
+	UNKNOWN = -13
+}
 
 const { values: argv } = parseArgs({
 	options: {
@@ -73,32 +69,57 @@ const ramSize = (1 << (27 - ((addrsel & 0xF0) >> 4)));
 const ramAddr = Number((BigInt(addrsel) & 0xFFFF0000n));
 
 console.log(sprintf("Ram: %08X, %dM", ramAddr, ramSize / 1024 / 1024));
+console.log("Searching empty ram block....");
 
-if (ramAddr != 0xB0000000 && ramSize < 16 * 1024 * 1024)
-	throw new Error("Ram addr or size is not supported.\n");
+let emptyRamBlock = ramAddr + ramSize - 256 * 1024;
+
+/*
+for (let i = ramAddr; i < ramAddr + ramSize; i += 256 * 1024) {
+	const blockStart = await dwd.readMemory(i, 230);
+	if (blockStart.buffer.every((v) => v == 0)) {
+		const fullBlock = await dwd.readMemory(i, 256 * 1024);
+		if (fullBlock.buffer.every((v) => v == 0)) {
+			emptyRamBlock = i;
+			break;
+		}
+	}
+}
+if (!emptyRamBlock) {
+	console.log("Empty RAM block not found!");
+	process.exit(1);
+}
+*/
+
+console.log(sprintf("Found empty ram block: %08X", emptyRamBlock));
 
 const bootMode = (await dwd.readMemory(BOOT_MODE, 4)).buffer.readUInt32LE(0);
 console.log(sprintf("Boot mode: %08X", bootMode));
 
 if (bootMode == 0xFFFFFFFF) {
 	console.log("Phone already patched!");
-	process.exit(0);
+	process.exit(1);
 }
 
 const oldIrqHandler = (await dwd.readMemory(PRAM_IRQ_HANDLER, 4)).buffer.readUInt32LE(0);
 console.log(sprintf("Old SWI handler: %08X", oldIrqHandler))
 
-const code = fs.readFileSync(import.meta.dirname + "/data/apoxi-unlock.bin");
-await dwd.writeMemory(PATCHER_ADDR, code);
-await dwd.writeMemory(PARAM_OLD_IRQ_HANDLER, uint32(oldIrqHandler));
-
-const check = await dwd.readMemory(PATCHER_ADDR, code.length);
-if (check.buffer.toString("hex") != code.toString("hex")) {
+const elf = loadELF(emptyRamBlock, fs.readFileSync(import.meta.dirname + "/data/apoxi-unlock.elf"));
+await dwd.writeMemory(emptyRamBlock, elf.image);
+const check = await dwd.readMemory(emptyRamBlock, elf.image.length);
+if (check.buffer.toString("hex") != elf.image.toString("hex")) {
 	console.log(check.buffer.toString("hex"));
-	console.log(code.toString("hex"));
+	console.log(elf.image.toString("hex"));
 	throw new Error("Payload corrupted!!!");
 }
 
+console.log(sprintf("Patcher entry: %08X", elf.entry));
+
+const PATCHER_ADDR = elf.entry;
+const PARAM_OLD_IRQ_HANDLER = PATCHER_ADDR + 4;
+const PARAM_RESPONSE_CODE = PATCHER_ADDR + 8;
+const PARAM_RESPONSE_FLASH_ID = PATCHER_ADDR + 12;
+
+await dwd.writeMemory(PARAM_OLD_IRQ_HANDLER, uint32(oldIrqHandler));
 await dwd.writeMemory(PRAM_IRQ_HANDLER, uint32(PATCHER_ADDR));
 
 await retryAsyncOnError(async () => {
@@ -107,7 +128,7 @@ await retryAsyncOnError(async () => {
 	const responseCode = (await dwd.readMemory(PARAM_RESPONSE_CODE, 4)).buffer.readInt32LE(0);
 	const responseFlashId = (await dwd.readMemory(PARAM_RESPONSE_FLASH_ID, 4)).buffer.readUInt32LE(0);
 
-	console.log(sprintf("Code: %08X (%s)", responseCode, PatchResponseCode[responseCode]));
+	console.log(sprintf("Code: %d (%s)", responseCode, PatchResponseCode[responseCode]));
 	console.log(sprintf("FlashID: %08X", responseFlashId));
 
 	if (responseCode == 0) {
