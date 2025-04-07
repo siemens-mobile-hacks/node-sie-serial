@@ -71,9 +71,8 @@ const ramAddr = Number((BigInt(addrsel) & 0xFFFF0000n));
 console.log(sprintf("Ram: %08X, %dM", ramAddr, ramSize / 1024 / 1024));
 console.log("Searching empty ram block....");
 
-let emptyRamBlock = ramAddr + ramSize - 256 * 1024;
+let emptyRamBlock = 0;
 
-/*
 for (let i = ramAddr; i < ramAddr + ramSize; i += 256 * 1024) {
 	const blockStart = await dwd.readMemory(i, 230);
 	if (blockStart.buffer.every((v) => v == 0)) {
@@ -84,11 +83,11 @@ for (let i = ramAddr; i < ramAddr + ramSize; i += 256 * 1024) {
 		}
 	}
 }
+
 if (!emptyRamBlock) {
 	console.log("Empty RAM block not found!");
 	process.exit(1);
 }
-*/
 
 console.log(sprintf("Found empty ram block: %08X", emptyRamBlock));
 
