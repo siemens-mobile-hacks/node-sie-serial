@@ -99,6 +99,11 @@ if (bootMode == 0xFFFFFFFF) {
 	process.exit(1);
 }
 
+if (bootMode != 0xFFFF0002) {
+	console.log(sprintf("Invalid boot mode: %08X", bootMode));
+	process.exit(1);
+}
+
 const oldIrqHandler = (await dwd.readMemory(PRAM_IRQ_HANDLER, 4)).buffer.readUInt32LE(0);
 console.log(sprintf("Old SWI handler: %08X", oldIrqHandler))
 
