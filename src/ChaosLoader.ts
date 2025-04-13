@@ -1,10 +1,10 @@
 import createDebug from 'debug';
-import { AsyncSerialPort } from "./AsyncSerialPort.js";
 import { loadBootCode, LoadBootCodeOptions } from "./BSL.js";
 import { sprintf } from 'sprintf-js';
 import { decodeCString } from './utils.js';
 import { CHAOS_BOOT_CODE } from "./chaos.bin.js";
 import { IoFlashRegion, ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from "./io.js";
+import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
 const debug = createDebug("chaos");
 
@@ -81,8 +81,7 @@ export class ChaosLoaderError extends Error {
 	}
 }
 
-export class ChaosLoader {
-	private readonly port: AsyncSerialPort;
+export class ChaosLoader extends BaseSerialProtocol {
 	private isConnected = false;
 	private heartbeatTimer?: NodeJS.Timeout;
 	private phoneInfo?: ChaosPhoneInfo;
@@ -91,10 +90,6 @@ export class ChaosLoader {
 
 	static getSupportedBaudrates(): number[] {
 		return Object.keys(BAUDRATES).map(parseInt);
-	}
-
-	constructor(port: AsyncSerialPort) {
-		this.port = port;
 	}
 
 	async connect(options: LoadBootCodeOptions = {}): Promise<void> {

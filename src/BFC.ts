@@ -2,9 +2,9 @@ import createDebug from 'debug';
 import { crc16 } from './crc16.js';
 import { AtChannel, AtCommandResponse } from './AtChannel.js';
 import { sprintf } from 'sprintf-js';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { decodeCString, usePromiseWithResolvers } from './utils.js';
 import { ioReadMemory, IoReadResult, IoReadWriteOptions } from "./io.js";
+import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
 const debug = createDebug('bfc');
 
@@ -108,20 +108,14 @@ export type BfcDisplayBufferData = IoReadResult & {
 	height: number;
 };
 
-export class BFC {
+export class BFC extends BaseSerialProtocol {
 	private mode = BfcTransportMode.NONE;
 	private authCache: Record<number, boolean> = {};
 	private frameReceivers: Record<number, BfcReceiver> = {};
 	private buffer = Buffer.alloc(0);
 	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
 	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
-	private readonly atc: AtChannel;
-	private readonly port: AsyncSerialPort;
-
-	constructor(port: AsyncSerialPort) {
-		this.port = port;
-		this.atc = new AtChannel(port);
-	}
+	private readonly atc = new AtChannel();
 
 	private setTransportMode(mode: BfcTransportMode): void {
 		if (this.mode == mode)
@@ -134,6 +128,7 @@ export class BFC {
 				this.port.off('data', this.handleSerialDataCallback);
 				this.port.off('close', this.handleSerialCloseCallback);
 				this.atc.stop();
+				this.atc.detachSerialPort();
 				this.buffer = Buffer.alloc(0);
 			break;
 
@@ -141,6 +136,7 @@ export class BFC {
 				debug(`Mode: AT`);
 				this.port.off('data', this.handleSerialDataCallback);
 				this.port.off('close', this.handleSerialCloseCallback);
+				this.atc.attachSerialPort(this.port);
 				this.atc.start();
 				this.buffer = Buffer.alloc(0);
 			break;
@@ -150,6 +146,7 @@ export class BFC {
 				this.port.on('data', this.handleSerialDataCallback);
 				this.port.on('close', this.handleSerialCloseCallback);
 				this.atc.stop();
+				this.atc.detachSerialPort();
 			break;
 		}
 	}

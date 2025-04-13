@@ -1,5 +1,4 @@
 import createDebug from 'debug';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { sprintf } from "sprintf-js";
 import { hexdump } from "./utils.js";
 import {
@@ -7,9 +6,11 @@ import {
 	ioReadMemory,
 	IoReadResult,
 	IoReadWriteOptions,
-	IoReadWriteProgress, ioWriteMemory,
+	IoReadWriteProgress,
+	ioWriteMemory,
 	IoWriteResult
 } from "./io.js";
+import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
 const debug = createDebug('dwd');
 const debugTrx = createDebug('dwd:trx');
@@ -97,13 +98,8 @@ export class DWDTimeoutError extends DWDError {
 
 }
 
-export class DWD {
-	private readonly port: AsyncSerialPort;
+export class DWD extends BaseSerialProtocol {
 	private keys: DWDKeys = DWD_KEYS["panasonic"];
-
-	constructor(port: AsyncSerialPort) {
-		this.port = port;
-	}
 
 	setKeys(keys: DWDKeys | string) {
 		if (typeof keys === "string") {

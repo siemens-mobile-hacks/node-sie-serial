@@ -1,6 +1,6 @@
 import createDebug from 'debug';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { usePromiseWithResolvers } from "./utils.js";
+import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
 const debug = createDebug('atc');
 
@@ -23,8 +23,7 @@ export type AtUnsolicitedHandler = {
 	callback: (line: string) => void;
 };
 
-export class AtChannel {
-	private port: AsyncSerialPort;
+export class AtChannel extends BaseSerialProtocol {
 	private buffer: string = "";
 	private unsolicitedHandlers: AtUnsolicitedHandler[] = [];
 	private paused = true;
@@ -41,10 +40,6 @@ export class AtChannel {
 	} | undefined;
 	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
 	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
-
-	constructor(port: AsyncSerialPort) {
-		this.port = port;
-	}
 
 	private handleSerialClose() {
 		this.stop();
@@ -220,11 +215,15 @@ export class AtChannel {
 
 		debug(`AT >> ${cmd}`);
 
-		try {
-			await this.port.write(`${cmd}\r`);
-		} catch (e) {
-			console.error(`[AtChannel]`, e);
-			this.resolveCurrentCommand(false, "PORT_CLOSED");
+		if (this.paused) {
+			this.resolveCurrentCommand(false, "PAUSED");
+		} else {
+			try {
+				await this.port.write(`${cmd}\r`);
+			} catch (e) {
+				console.error(`[AtChannel]`, e);
+				this.resolveCurrentCommand(false, "PORT_CLOSED");
+			}
 		}
 
 		const response = await promise;

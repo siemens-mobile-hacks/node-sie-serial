@@ -1,9 +1,9 @@
 import createDebug from 'debug';
 import { AtChannel } from "./AtChannel.js";
-import { AsyncSerialPort } from './AsyncSerialPort.js';
 import { sprintf } from 'sprintf-js';
 import { retryAsync } from "./utils.js";
 import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from "./io.js";
+import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
 const debug = createDebug('cgsn');
 
@@ -54,21 +54,19 @@ export type CgsnQueryResponse = CgsnBaseResponse<{
 	values: number[]
 }>;
 
-export class CGSN {
-	private readonly port: AsyncSerialPort;
-	private readonly atc: AtChannel;
+export type CgsnReadMemoryResponse = CgsnBaseResponse<IoReadResult>;
+export type CgsnWriteMemoryResponse = CgsnBaseResponse<IoWriteResult>;
+
+export class CGSN extends BaseSerialProtocol {
+	private readonly atc: AtChannel = new AtChannel();
 	private connectionType: string = "";
 	private isConnected = false;
-
-	constructor(port: AsyncSerialPort) {
-		this.port = port;
-		this.atc = new AtChannel(port);
-	}
 
 	async connect(testBaudRates?: number[]) {
 		if (this.isConnected)
 			await this.disconnect();
 
+		this.atc.attachSerialPort(this.port);
 		this.atc.start();
 		testBaudRates ||= SERIAL_BAUD_RATES;
 		for (const baudRate of testBaudRates) {
@@ -266,7 +264,7 @@ export class CGSN {
 		return { success: true, values };
 	}
 
-	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<CgsnBaseResponse<IoReadResult>> {
+	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<CgsnReadMemoryResponse> {
 		try {
 			const result = await ioReadMemory({
 				debug,
@@ -281,7 +279,7 @@ export class CGSN {
 		}
 	}
 
-	async writeMemory(address: number, buffer: Buffer, options: IoReadWriteOptions = {}): Promise<CgsnBaseResponse<IoWriteResult>> {
+	async writeMemory(address: number, buffer: Buffer, options: IoReadWriteOptions = {}): Promise<CgsnWriteMemoryResponse> {
 		try {
 			const result = await ioWriteMemory({
 				debug,
@@ -328,6 +326,7 @@ export class CGSN {
 		if (this.isConnected && this.port.isOpen)
 			await this.setBaudRate(115200);
 		this.atc.stop();
+		this.atc.detachSerialPort();
 		this.isConnected = false;
 	}
 }

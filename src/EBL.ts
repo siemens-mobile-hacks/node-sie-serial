@@ -1,8 +1,8 @@
 import { sprintf } from "sprintf-js";
-import { AsyncSerialPort } from "./AsyncSerialPort.js";
 import createDebug from "debug";
 import { loadBootCode, LoadBootCodeOptions } from "./BSL.js";
 import { decodeCString, hexdump } from "./utils.js";
+import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
 const debug = createDebug('ebl');
 
@@ -43,13 +43,8 @@ type EBUFLashInfo = {
 	pid: number;
 };
 
-export class EBL {
-	private readonly port: AsyncSerialPort;
+export class EBL extends BaseSerialProtocol {
 	private eblInfo?: EBLInfo;
-
-	constructor(port: AsyncSerialPort) {
-		this.port = port;
-	}
 
 	getSupportedBaudrates() {
 		return BAUDRATES;
