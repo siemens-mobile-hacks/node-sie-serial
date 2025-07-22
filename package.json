@@ -7,11 +7,10 @@
 	"scripts": {
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"pub": "npm version patch && npm publish --access public",
 		"build": "tsc",
 		"watch": "tsc -w"
 	},
-	"author": "",
+	"author": "kirill.zhumarin@gmail.com",
 	"license": "MIT",
 	"description": "Various serial protocols which are used in the Siemens Mobile Phones.",
 	"repository": {

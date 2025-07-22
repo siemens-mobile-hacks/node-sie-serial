@@ -33,6 +33,8 @@ enum FrameType {
 	WRITE_MEMORY_REQ = 0x78,
 	WRITE_MEMORY_RESP = 0x79,
 	SW_RESET_REQ = 0xAD,
+	GET_SW_VERSION_REQ = 0x54,
+	GET_SW_VERSION_RESP = 0x55,
 }
 
 export type DWDKeys = {
@@ -68,10 +70,18 @@ const FRAME_SIZE = {
 	[FrameType.READ_MEMORY_RESP]: 0,
 	[FrameType.WRITE_MEMORY_REQ]: 8,
 	[FrameType.WRITE_MEMORY_RESP]: 4,
-	[FrameType.SW_RESET_REQ]: 2
+	[FrameType.SW_RESET_REQ]: 2,
+	[FrameType.GET_SW_VERSION_REQ]: 2,
+	[FrameType.GET_SW_VERSION_RESP]: 0,
 };
 
 export const DWD_KEYS: Record<string, DWDKeys> = {
+	"auto": {
+		key1: Buffer.from("00000000000000000000000000000000", "hex"),
+		key2: 0x0000,
+		key3: Buffer.from("00000000000000000000000000000000", "hex"),
+		key4: 0x0000,
+	},
 	"lg": {
 		key1: Buffer.from("70C469DA2C399DB11E26AB61F0B25204", "hex"),
 		key2: 0x62B5,
@@ -79,6 +89,12 @@ export const DWD_KEYS: Record<string, DWDKeys> = {
 		key4: 0x0000,
 	},
 	"panasonic": {
+		key1: Buffer.from("F806A5AF18EE7E1C1E737C6CC0F95236", "hex"),
+		key2: 0x7C6C,
+		key3: Buffer.from("00000000000000000000000000000000", "hex"),
+		key4: 0x0000,
+	},
+	"siemens": {
 		key1: Buffer.from("F806A5AF18EE7E1C1E737C6CC0F95236", "hex"),
 		key2: 0x7C6C,
 		key3: Buffer.from("00000000000000000000000000000000", "hex"),
@@ -99,7 +115,7 @@ export class DWDTimeoutError extends DWDError {
 }
 
 export class DWD extends BaseSerialProtocol {
-	private keys: DWDKeys = DWD_KEYS["panasonic"];
+	private keys: DWDKeys = DWD_KEYS["auto"];
 
 	setKeys(keys: DWDKeys | string) {
 		if (typeof keys === "string") {
@@ -113,6 +129,26 @@ export class DWD extends BaseSerialProtocol {
 	}
 
 	async connect() {
+		if (this.keys === DWD_KEYS["auto"]) {
+			let lastError: unknown | undefined;
+			for (const keyName in DWD_KEYS) {
+				if (keyName == "auto")
+					continue;
+				debug(`Trying key: ${keyName}`);
+				try {
+					this.setKeys(keyName);
+					await this.connect();
+					debug(`Key found: ${keyName}`);
+					return;
+				} catch (e) {
+					debug(`Bad key: ${keyName}`);
+					lastError = e;
+				}
+			}
+			this.setKeys("auto");
+			throw lastError;
+		}
+
 		debug("Enabling V24 mode");
 		await this.setV24(true);
 		debug("Sending handshake #1");
@@ -126,6 +162,13 @@ export class DWD extends BaseSerialProtocol {
 	async disconnect() {
 		debug("Disabling V24 mode");
 		await this.setV24(false);
+	}
+
+	async getSWVersion() {
+		const request = this.newRequest(FrameType.GET_SW_VERSION_REQ);
+		const response = await this.execCommand(request, FrameType.GET_SW_VERSION_RESP);
+		const [sw, power, cpu] = response.subarray(4, -1).toString().split(/\s+/);
+		return { sw, power, cpu };
 	}
 
 	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<IoReadResult> {

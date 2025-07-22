@@ -2,7 +2,6 @@ import { DWD } from "../src/index.js";
 import fs from "fs";
 import { openPort } from "./utils.js";
 import { parseArgs } from "node:util";
-import { sprintf } from "sprintf-js";
 
 const { values: argv } = parseArgs({
 	options: {
@@ -48,8 +47,10 @@ for (const key2 of possibleKeys) {
 console.log(foundKeys);
 */
 
-dwd.setKeys("panasonic");
+dwd.setKeys("auto");
 await dwd.connect();
+
+console.log(await dwd.getSWVersion());
 
 const result = await dwd.readMemory(0x00000000, 96 * 1024, {
 	onProgress({ percent, speed, remaining }) {

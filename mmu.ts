@@ -14,7 +14,6 @@ type MMUTableRow = {
 };
 
 const n = 0;
-
 const table = readMmuTable(n * 16 * 1024, fs.readFileSync("/tmp/sram.bin"));
 decodeMMU(table);
 
