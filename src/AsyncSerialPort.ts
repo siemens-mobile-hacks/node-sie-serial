@@ -107,6 +107,9 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 				}
 			};
 
+			if (!this.port.isOpen)
+				reject(new Error("Port is not open"));
+
 			this.port.on("close", onClose);
 			this.port.on("end", onEnd);
 			this.port.on("error", onError);
@@ -119,6 +122,8 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 
 	async write(data: any): Promise<void> {
 		return new Promise((resolve, reject) => {
+			if (!this.port.isOpen)
+				reject(new Error("Port is not open"));
 			this.port.write(data);
 			this.port.drain((err) => {
 				if (err) {
@@ -132,6 +137,8 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 
 	async getSignals(): Promise<void> {
 		return new Promise((resolve, reject) => {
+			if (!this.port.isOpen)
+				reject(new Error("Port is not open"));
 			this.port.get((err) => {
 				if (err) {
 					reject(err);
@@ -144,6 +151,8 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 
 	async setSignals(signals: SetOptions): Promise<void> {
 		return new Promise((resolve, reject) => {
+			if (!this.port.isOpen)
+				reject(new Error("Port is not open"));
 			this.port.set(signals, (err) => {
 				if (err) {
 					reject(err);
@@ -156,6 +165,8 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 
 	update(settings: { baudRate: number }): Promise<void> {
 		return new Promise((resolve, reject) => {
+			if (!this.port.isOpen)
+				reject(new Error("Port is not open"));
 			this.port.update(settings, (err) => {
 				if (err) {
 					reject(err);

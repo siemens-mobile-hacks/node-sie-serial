@@ -60,6 +60,12 @@ export type BruteforceKey2Options = {
 	to?: number;
 };
 
+export type DWDMemoryRegion = {
+	addr: number;
+	size: number;
+	name: string;
+};
+
 const FRAME_SIZE = {
 	[FrameType.NO_RESP]: -1,
 	[FrameType.CONNECT1_REQ]: 10,
@@ -169,6 +175,62 @@ export class DWD extends BaseSerialProtocol {
 		const response = await this.execCommand(request, FrameType.GET_SW_VERSION_RESP);
 		const [sw, power, cpu] = response.subarray(4, -1).toString().split(/\s+/);
 		return { sw, power, cpu };
+	}
+
+	async getMemoryRegions() {
+		const memoryRegions: DWDMemoryRegion[] = [
+			{
+				name:	"BROM",
+				addr:	0x00400000,
+				size:	0x00008000,
+			}, {
+				name:	"TCM",
+				addr:	0xFFFF0000,
+				size:	0x00004000,
+			}, {
+				name:	"SRAM",
+				addr:	0x00080000,
+				size:	0x00018000,
+			}
+		];
+		for (let i = 0; i < 4; i++) {
+			const ADDRSEL = (await this.readMemory(0xF0000080 + i * 8, 4)).buffer.readUInt32LE(0);
+			const BUSCON = (await this.readMemory(0xF00000C0 + i * 8, 4)).buffer.readUInt32LE(0);
+
+			const addr = (ADDRSEL & 0xFFFFF000) >>> 0;
+			const mask = (ADDRSEL & 0x000000F0) >>> 4;
+			const size = (1 << (27 - mask));
+			const enabled = (ADDRSEL & 1) !== 0;
+			const agen = (BUSCON & 0x70000000) >>> 28;
+
+			if (enabled) {
+				if (addr >= 0xA0000000 && addr < 0xB0000000) {
+					// NOR FLASH always on A0000000
+					memoryRegions.push({ name: "FLASH", addr, size });
+				} else if (agen == 3 || agen == 4) {
+					// AGEN=SDRAM access type 0 or SDRAM access type 1
+					memoryRegions.push({ name: "RAM", addr, size });
+				}
+			}
+		}
+
+		memoryRegions.sort((a, b) => a.addr - b.addr);
+
+		const nameCounter: Record<string, number> = {};
+		const merged: DWDMemoryRegion[] = [];
+		for (const region of memoryRegions) {
+			const last = merged.at(-1);
+			if (last && last.addr + last.size === region.addr && region.name == last.name) {
+				last.size += region.size;
+			} else {
+				nameCounter[region.name] = (nameCounter[region.name] ?? 0) + 1;
+				if (nameCounter[region.name] > 1)
+					region.name += nameCounter[region.name] - 1;
+				merged.push({ ...region });
+			}
+		}
+
+		return merged;
 	}
 
 	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<IoReadResult> {
@@ -412,7 +474,6 @@ export class DWD extends BaseSerialProtocol {
 				throw new DWDTimeoutError("DWD command (%04X) timeout! (body)", requestFrameId);
 
 			debugTrx.enabled && debugTrx(sprintf(`[RX] %s %s`, hexdump(frameHeader), hexdump(frameBody)));
-
 			if (frameBody.length != expectedResponseLength) {
 				throw new DWDError(sprintf("Invalid DWD command (%04X) response frame (%04X) length! (expected: %d, received: %d)",
 					requestFrameId, responseFrameId, expectedResponseLength, frameBody.length));
