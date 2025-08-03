@@ -146,7 +146,7 @@ export async function ioReadMemory(api: IoReadApi, address: number, length: numb
 		progressInterval: 100,
 		...options
 	};
-	const buffer = Buffer.alloc(length);
+	let buffer = Buffer.alloc(length);
 	let cursor = 0;
 	let canceled = false;
 	let errors = 0;
@@ -226,6 +226,10 @@ export async function ioReadMemory(api: IoReadApi, address: number, length: numb
 
 	progress.report(cursor, errors, 0);
 	progress.stop();
+
+	// Partial result
+	if (canceled)
+		buffer = buffer.subarray(0, cursor);
 
 	return { buffer, canceled, errors };
 }
