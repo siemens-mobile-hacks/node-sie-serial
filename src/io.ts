@@ -124,7 +124,7 @@ export function ioProgressTracker(options: IoProgressOptions) {
 			lastSpeedCheck = Date.now();
 		}
 
-		if (!options.progressInterval || (Date.now() - lastProgressCalled > options.progressInterval && cursor > 0)) {
+		if (!options.progressInterval || (Date.now() - lastProgressCalled >= options.progressInterval && cursor > 0)) {
 			reportProgressDirect();
 			progressCalled = true;
 		} else {

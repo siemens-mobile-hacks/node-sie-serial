@@ -247,7 +247,7 @@ export class DWD extends BaseSerialProtocol {
 		return ioWriteMemory({
 			debug,
 			align: 4,
-			pageSize: 128,
+			pageSize: MAX_MEMORY_WRITE_CHUNK,
 			maxRetries: 3,
 			write: this.writeMemoryChunk.bind(this)
 		}, address, buffer, options);

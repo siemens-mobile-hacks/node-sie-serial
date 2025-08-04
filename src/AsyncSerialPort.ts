@@ -58,6 +58,12 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 	}
 
 	async read(size: number, timeout?: number): Promise<Buffer | undefined> {
+		if (!this.port.isOpen)
+			throw new Error("Port is not open");
+
+		if (this.port.readableLength >= size)
+			return this.port.read(size);
+
 		return new Promise((resolve, reject) => {
 			let result: Buffer | undefined;
 			let bytesRead = 0;
@@ -107,8 +113,10 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 				}
 			};
 
-			if (!this.port.isOpen)
-				reject(new Error("Port is not open"));
+			if (this.port.readableLength > 0)
+				onReadable();
+			if (bytesRead == size)
+				return;
 
 			this.port.on("close", onClose);
 			this.port.on("end", onEnd);
@@ -121,18 +129,9 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 	}
 
 	async write(data: any): Promise<void> {
-		return new Promise((resolve, reject) => {
-			if (!this.port.isOpen)
-				reject(new Error("Port is not open"));
-			this.port.write(data);
-			this.port.drain((err) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
-				}
-			});
-		});
+		if (!this.port.isOpen)
+			throw new Error("Port is not open");
+		this.port.write(data);
 	}
 
 	async getSignals(): Promise<void> {
