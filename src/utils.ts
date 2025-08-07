@@ -1,3 +1,32 @@
+import { sprintf } from "sprintf-js";
+
+const USB_DEVICES: Record<string, string> = {
+	"067B:2303": "PL2303",
+	"1A86:7523": "CH340",
+	"0403:6001": "FT232",
+	"10C4:EA60": "СР2102",
+	"11F5:0001": "DCA-540",
+	"11F5:0002": "DCA-540",
+	"11F5:0003": "DCA-540",
+	"11F5:0004": "DCA-540",
+	"11F5:0005": "DCA-540",
+	"11F5:0006": "DCA-540",
+	"11F5:0007": "DCA-540",
+	"11F5:1004": "DCA-540",
+	"04DA:2121": "Panasonic VS/MX/SA",
+	"04DA:2129": "Softbank 705p",
+	"04DA:213C": "Softbank 810p",
+	"04DA:2149": "Softbank 820p",
+	"04DA:2159": "Softbank 821p",
+	"04DA:2172": "Softbank 830p",
+	"04DA:2173": "Softbank 831p",
+};
+
+export function getUSBDeviceName(vid: number, pid: number) {
+	const id = sprintf("%04X:%04X", vid, pid);
+	return USB_DEVICES[id] ?? id;
+}
+
 export function usePromiseWithResolvers<T>() {
 	let resolve: ((value: (PromiseLike<T> | T)) => void) | undefined;
 	let reject: ((reason?: any) => void) | undefined;
