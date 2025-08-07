@@ -22,9 +22,9 @@ const USB_DEVICES: Record<string, string> = {
 	"04DA:2173": "Softbank 831p",
 };
 
-export function getUSBDeviceName(vid: number, pid: number) {
+export function getUSBDeviceName(vid: number, pid: number): string | undefined {
 	const id = sprintf("%04X:%04X", vid, pid);
-	return USB_DEVICES[id] ?? id;
+	return USB_DEVICES[id];
 }
 
 export function usePromiseWithResolvers<T>() {

@@ -7,3 +7,4 @@ export * from './EBL.js';
 export * from './ChaosLoader.js';
 export * from './AsyncSerialPort.js';
 export * from './io.js';
+export { getUSBDeviceName } from './utils.js';
