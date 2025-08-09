@@ -189,7 +189,7 @@ export class DWD extends BaseSerialProtocol {
 				size:	0x00004000,
 			}, {
 				name:	"SRAM",
-				addr:	0x00080000,
+				addr:	0x00000000,
 				size:	0x00018000,
 			}
 		];

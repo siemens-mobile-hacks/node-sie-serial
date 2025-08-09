@@ -7,6 +7,7 @@ import { ioReadMemory, IoReadResult, IoReadWriteOptions } from "./io.js";
 import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
 const debug = createDebug('bfc');
+const debugTrx = createDebug('bfc:trx');
 
 const MAX_MEMORY_READ_CHUNK = 63 * 256;
 export const DEFAULT_CHANNEL_ID = 0x01;
@@ -291,7 +292,8 @@ export class BFC extends BaseSerialProtocol {
 		const receiver = this.frameReceivers[dst];
 		const ignored = !receiver || receiver.src != src;
 
-		debug(sprintf(`RX %02X >> %02X [CRC:%d, ACK:%d, TYPE:%02X] %s%s`, src, dst, crc, ack, frameType, payload.toString('hex'), ignored ? ` (ignored)` : ``));
+		if (debugTrx.enabled)
+			debugTrx(sprintf(`RX %02X >> %02X [CRC:%d, ACK:%d, TYPE:%02X] %s%s`, src, dst, crc, ack, frameType, payload.toString('hex'), ignored ? ` (ignored)` : ``));
 
 		if ((frameFlags & BfcFrameFlags.CRC) && !checkPacketChecksum(pkt)) {
 			void this.handleReceiverResponse(src, dst, new Error(`Invalid CRC!`));
@@ -425,7 +427,9 @@ export class BFC extends BaseSerialProtocol {
 
 		const crc = (frameFlags & BfcFrameFlags.CRC) != 0 ? 1 : 0;
 		const ack = (frameFlags & BfcFrameFlags.ACK) != 0 ? 1 : 0;
-		debug(sprintf(`TX %02X >> %02X [CRC:%d, ACK:%d, TYPE:%02X] %s`, +src, +dst, crc, ack, frameType, payload.toString('hex')));
+
+		if (debugTrx.enabled)
+			debugTrx(sprintf(`TX %02X >> %02X [CRC:%d, ACK:%d, TYPE:%02X] %s`, +src, +dst, crc, ack, frameType, payload.toString('hex')));
 
 		await this.port.write(pkt);
 	}
