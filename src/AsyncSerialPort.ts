@@ -1,6 +1,12 @@
 import { SerialPortStream } from "@serialport/stream";
 import { BindingInterface, SetOptions } from "@serialport/bindings-interface";
 
+type PortSignals = {
+	cts: boolean
+	dsr: boolean
+	dcd: boolean
+} | undefined;
+
 export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 	private readonly port: SerialPortStream<T>;
 
@@ -101,7 +107,7 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 				if (bytesToRead == 0)
 					return;
 
-				let chunk = this.port.read(bytesToRead);
+				const chunk = this.port.read(bytesToRead);
 				if (!result)
 					result = Buffer.alloc(size);
 				chunk.copy(result, bytesRead);
@@ -129,20 +135,28 @@ export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
 	}
 
 	async write(data: any): Promise<void> {
-		if (!this.port.isOpen)
-			throw new Error("Port is not open");
-		this.port.write(data);
-	}
-
-	async getSignals(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			if (!this.port.isOpen)
-				reject(new Error("Port is not open"));
-			this.port.get((err) => {
+				throw new Error("Port is not open");
+			this.port.write(data, (err) => {
 				if (err) {
 					reject(err);
 				} else {
 					resolve();
+				}
+			});
+		});
+	}
+
+	async getSignals(): Promise<PortSignals> {
+		return new Promise((resolve, reject) => {
+			if (!this.port.isOpen)
+				reject(new Error("Port is not open"));
+			this.port.get((err, signals) => {
+				if (err) {
+					reject(err);
+				} else {
+					resolve(signals);
 				}
 			});
 		});
