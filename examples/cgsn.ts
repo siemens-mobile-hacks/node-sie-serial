@@ -38,6 +38,8 @@ if (await cgsn.connect()) {
 
 await cgsn.setBestBaudRate();
 
+console.log(await cgsn.getMemoryRegions());
+
 await cgsn.readMemory(0xA0000000, 1024, {
 	onProgress({ percent, speed, remaining }) {
 		console.log(`Progress: ${percent.toFixed(2)}% | Speed: ${(speed / 1024).toFixed(2)} KB/s | ETA: ${remaining.toFixed(2)}s`);

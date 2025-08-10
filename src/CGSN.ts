@@ -1,5 +1,5 @@
 import createDebug from 'debug';
-import { AtChannel } from "./AtChannel.js";
+import { AtChannel, AtCommandResponse } from "./AtChannel.js";
 import { sprintf } from 'sprintf-js';
 import { retryAsync } from "./utils.js";
 import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from "./io.js";
@@ -11,13 +11,13 @@ const SERIAL_BAUD_RATES = [115200, 460800, 921600];
 
 /*
  * AT+CGSN:A0000000,00000008
- * Read data from memory address A0000000 Length 8 Bytes (If Size is not specified then read 256 bytes)
+ * Read data from memory address A0000000 Length 8 Bytes (If Size is not specified, then read 256 bytes)
  *
  * AT+CGSN@A08E8DE4,0000001A,00004225
  * Call address A08E8DE4, R0 = 0000001A, R1 = 00004225 (R0-R7 Can be given)
  * Out is the R0-R12 Registers Dump and CPSR
  *
- * AT+CGSN*A80B180011223344....
+ * AT+CGSN*A80B180011223344...
  * Write Data to RAM. address A80B1800
  * Max Size 128 bytes per command
  *
@@ -56,6 +56,16 @@ export type CgsnQueryResponse = CgsnBaseResponse<{
 
 export type CgsnReadMemoryResponse = CgsnBaseResponse<IoReadResult>;
 export type CgsnWriteMemoryResponse = CgsnBaseResponse<IoWriteResult>;
+
+export type CgsnMemoryRegion = {
+	addr: number;
+	size: number;
+	name: string;
+};
+
+export type CgsnGetMemoryRegionsResponse = CgsnBaseResponse<{
+	regions: CgsnMemoryRegion[]
+}>;
 
 export class CGSN extends BaseSerialProtocol {
 	private readonly atc: AtChannel = new AtChannel();
@@ -320,6 +330,96 @@ export class CGSN extends BaseSerialProtocol {
 			throw new Error(`AT command failed: ${cmd}`);
 		if (response.binary![0] != 0xA1)
 			throw new Error(`Invalid ACK: 0x${response.binary![0].toString(16)}`);
+	}
+
+	async getMemoryRegions(): Promise<CgsnGetMemoryRegionsResponse> {
+		const atc = this.getAtChannel();
+
+		let response: AtCommandResponse;
+		let model: string;
+		let vendor: string;
+		let svn: string;
+
+		response = await atc.sendCommand("AT+CGMI");
+		if (!response.success)
+			return { success: false, error: `Can't get phone vendor.` };
+		vendor = response.lines[0];
+
+		response = await atc.sendCommand("AT+CGMM");
+		if (!response.success)
+			return { success: false, error: `Can't get phone model.` };
+		model = response.lines[0];
+
+		response = await atc.sendCommand("AT+CGMR");
+		if (!response.success)
+			return { success: false, error: `Can't get phone sw version.` };
+		const match = response.lines[0].match(/^\s*(\d+)/);
+		if (!match)
+			return { success: false, error: `Invalid phone sw version (${response.lines[0]}).` };
+		svn = match[0];
+
+		debug(`Detected phone ${vendor} ${model}v${svn}`);
+
+		const regions: CgsnMemoryRegion[] = [
+			{
+				name:	"BROM",
+				addr:	0x00400000,
+				size:	0x00008000,
+			}, {
+				name:	"TCM",
+				addr:	0x00000000,
+				size:	0x00004000,
+			}, {
+				name:	"SRAM",
+				addr:	0x00080000,
+				size:	0x00018000,
+			}
+		];
+
+		if (model.match(/^(E71|EL71|M72|CL61)(F|C|)$/i)) {
+			regions.push({
+				name:	"RAM",
+				addr:	0xA8000000,
+				size:	0x01000000,
+			});
+			regions.push({
+				name:	"VMALLOC",
+				addr:	0xAC000000,
+				size:	0x01800000,
+			});
+		} else if (model.match(/^(C81|M81|S68)(F|C|)$/i)) {
+			regions.push({
+				name:	"RAM",
+				addr:	0xA8000000,
+				size:	0x01000000,
+			});
+			regions.push({
+				name:	"VMALLOC",
+				addr:	0xAC000000,
+				size:	0x00E00000,
+			});
+		} else if (model.match(/^(S75|SL75|CX75|M75|SK65)(F|C|)$/i)) {
+			regions.push({
+				name:	"RAM",
+				addr:	0xA8000000,
+				size:	0x01000000,
+			});
+		} else if (model.match(/^(CX70|C65|CX65|M65|S65|SL65|ME75|CF75|C75|C72)(F|C|)$/i)) {
+			regions.push({
+				name:	"RAM",
+				addr:	0xA8000000,
+				size:	0x00800000,
+			});
+		} else {
+			debug(`Detected unknown phone! Memory regions maybe incorrect.`);
+			regions.push({
+				name:	"RAM",
+				addr:	0xA8000000,
+				size:	0x00800000,
+			});
+		}
+
+		return { success: true, regions };
 	}
 
 	async disconnect() {

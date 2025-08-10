@@ -246,7 +246,7 @@ export class DWD extends BaseSerialProtocol {
 	async writeMemory(address: number, buffer: Buffer, options: IoReadWriteOptions = {}): Promise<IoWriteResult> {
 		return ioWriteMemory({
 			debug,
-			align: 4,
+			align: 1,
 			pageSize: MAX_MEMORY_WRITE_CHUNK,
 			maxRetries: 3,
 			write: this.writeMemoryChunk.bind(this)
