@@ -180,10 +180,6 @@ export class DWD extends BaseSerialProtocol {
 	async getMemoryRegions() {
 		const memoryRegions: DWDMemoryRegion[] = [
 			{
-				name:	"BROM",
-				addr:	0x00400000,
-				size:	0x00008000,
-			}, {
 				name:	"TCM",
 				addr:	0xFFFF0000,
 				size:	0x00004000,
