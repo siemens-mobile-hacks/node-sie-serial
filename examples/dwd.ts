@@ -52,13 +52,12 @@ dwd.setKeys("auto");
 await dwd.connect();
 
 console.log(await dwd.getSWVersion());
-type EBUMemoryRegion = {
-	addr: number;
-	size: number;
-	name: string;
-	descr: string;
-};
 
+for (let i = 0; i < 64; i++) {
+	const r = await dwd.readMemory(0xF0000000 + i * 4, 4);
+
+	console.log(sprintf("%08X %08X", 0xF0000000 + i * 4, r.buffer.readUInt32LE(0)));
+}
 console.log(await dwd.getMemoryRegions());
 
 /*

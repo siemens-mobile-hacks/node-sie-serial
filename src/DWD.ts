@@ -71,7 +71,7 @@ const FRAME_SIZE = {
 	[FrameType.CONNECT1_REQ]: 10,
 	[FrameType.CONNECT1_RESP]: 10,
 	[FrameType.CONNECT2_REQ]: 8,
-	[FrameType.CONNECT2_RESP]: 6,
+	[FrameType.CONNECT2_RESP]: 0,
 	[FrameType.READ_MEMORY_REQ]: 8,
 	[FrameType.READ_MEMORY_RESP]: 0,
 	[FrameType.WRITE_MEMORY_REQ]: 8,
@@ -88,6 +88,12 @@ export const DWD_KEYS: Record<string, DWDKeys> = {
 		key3: Buffer.from("00000000000000000000000000000000", "hex"),
 		key4: 0x0000,
 	},
+	"service": { // service key for all APOXI
+		key1: Buffer.from("F806A5AF18EE7E1C1E737C6CC0F95236", "hex"),
+		key2: 0x7C6C,
+		key3: Buffer.from("00000000000000000000000000000000", "hex"),
+		key4: 0x0000,
+	},
 	"lg": {
 		key1: Buffer.from("70C469DA2C399DB11E26AB61F0B25204", "hex"),
 		key2: 0x62B5,
@@ -95,14 +101,8 @@ export const DWD_KEYS: Record<string, DWDKeys> = {
 		key4: 0x0000,
 	},
 	"panasonic": {
-		key1: Buffer.from("F806A5AF18EE7E1C1E737C6CC0F95236", "hex"),
-		key2: 0x7C6C,
-		key3: Buffer.from("00000000000000000000000000000000", "hex"),
-		key4: 0x0000,
-	},
-	"siemens": {
-		key1: Buffer.from("F806A5AF18EE7E1C1E737C6CC0F95236", "hex"),
-		key2: 0x7C6C,
+		key1: Buffer.from("A3F9A49C5DE37D922511958D56CE51F2", "hex"),
+		key2: 0x17D2,
 		key3: Buffer.from("00000000000000000000000000000000", "hex"),
 		key4: 0x0000,
 	}
@@ -189,9 +189,22 @@ export class DWD extends BaseSerialProtocol {
 				size:	0x00018000,
 			}
 		];
+
+		const EBU_ID = (await this.readMemory(0xF0000008, 4)).buffer.readUInt32LE(0)
+		const EBU_REV = EBU_ID & 0xFF;
+		debug(sprintf("EBU_ID=%08X, EBU_REV=%d", EBU_ID, EBU_REV));
+
 		for (let i = 0; i < 4; i++) {
-			const ADDRSEL = (await this.readMemory(0xF0000080 + i * 8, 4)).buffer.readUInt32LE(0);
-			const BUSCON = (await this.readMemory(0xF00000C0 + i * 8, 4)).buffer.readUInt32LE(0);
+			let ADDRSEL: number = 0;
+			let BUSCON: number = 0;
+
+			if (EBU_REV < 8) {
+				ADDRSEL = (await this.readMemory(0xF0000080 + i * 8, 4)).buffer.readUInt32LE(0);
+				BUSCON = (await this.readMemory(0xF00000C0 + i * 8, 4)).buffer.readUInt32LE(0);
+			} else {
+				ADDRSEL = (await this.readMemory(0xF0000020 + i * 4, 4)).buffer.readUInt32LE(0);
+				BUSCON = (await this.readMemory(0xF0000060 + i * 4, 4)).buffer.readUInt32LE(0);
+			}
 
 			const addr = (ADDRSEL & 0xFFFFF000) >>> 0;
 			const mask = (ADDRSEL & 0x000000F0) >>> 4;
@@ -199,13 +212,19 @@ export class DWD extends BaseSerialProtocol {
 			const enabled = (ADDRSEL & 1) !== 0;
 			const agen = (BUSCON & 0x70000000) >>> 28;
 
+			debug(sprintf("CS%d: ADDRSEL=%08X, BUSCON=%08X", i, ADDRSEL, BUSCON));
+
 			if (enabled) {
 				if (addr >= 0xA0000000 && addr < 0xB0000000) {
 					// NOR FLASH always on A0000000
 					memoryRegions.push({ name: "FLASH", addr, size });
+					debug(sprintf("  NOR FLASH %08X %08X", addr, size));
 				} else if (agen == 3 || agen == 4) {
 					// AGEN=SDRAM access type 0 or SDRAM access type 1
 					memoryRegions.push({ name: "RAM", addr, size });
+					debug(sprintf("  RAM %08X %08X", addr, size));
+				} else {
+					debug(sprintf("  UNKNOWN %08X %08X", addr, size));
 				}
 			}
 		}
@@ -429,7 +448,7 @@ export class DWD extends BaseSerialProtocol {
 		request.writeUInt16LE(RAND4, 2);
 		request.writeUInt16LE((keys.key1[0xF - keyRotate] ^ keys.key3[keyRotate] << 4 ^ 0x4d33) & 0xFFFF, 4);
 		request.writeUInt16LE(RAND4, 6);
-		await this.execCommand(request, FrameType.CONNECT2_RESP, timeout);
+		console.log(await this.execCommand(request, FrameType.CONNECT2_RESP, timeout));
 	}
 
 	newRequest(frameId: FrameType, payloadLength: number = 0): Buffer {
