@@ -197,20 +197,22 @@ export class DWD extends BaseSerialProtocol {
 		for (let i = 0; i < 4; i++) {
 			let ADDRSEL: number = 0;
 			let BUSCON: number = 0;
+			let agen: number = 0;
 
 			if (EBU_REV < 8) {
 				ADDRSEL = (await this.readMemory(0xF0000080 + i * 8, 4)).buffer.readUInt32LE(0);
 				BUSCON = (await this.readMemory(0xF00000C0 + i * 8, 4)).buffer.readUInt32LE(0);
+				agen = (BUSCON & 0x70000000) >>> 28;
 			} else {
-				ADDRSEL = (await this.readMemory(0xF0000020 + i * 4, 4)).buffer.readUInt32LE(0);
-				BUSCON = (await this.readMemory(0xF0000060 + i * 4, 4)).buffer.readUInt32LE(0);
+				ADDRSEL = (await this.readMemory(0xF0000010 + i * 4, 4)).buffer.readUInt32LE(0);
+				BUSCON = (await this.readMemory(0xF0000020 + i * 4, 4)).buffer.readUInt32LE(0);
+				agen = (BUSCON & 0x70000000) >>> 28;
 			}
 
 			const addr = (ADDRSEL & 0xFFFFF000) >>> 0;
 			const mask = (ADDRSEL & 0x000000F0) >>> 4;
 			const size = (1 << (27 - mask));
 			const enabled = (ADDRSEL & 1) !== 0;
-			const agen = (BUSCON & 0x70000000) >>> 28;
 
 			debug(sprintf("CS%d: ADDRSEL=%08X, BUSCON=%08X", i, ADDRSEL, BUSCON));
 
@@ -223,8 +225,11 @@ export class DWD extends BaseSerialProtocol {
 					// AGEN=SDRAM access type 0 or SDRAM access type 1
 					memoryRegions.push({ name: "RAM", addr, size });
 					debug(sprintf("  RAM %08X %08X", addr, size));
+				} else if (agen == 3 || agen == 4) {
+					// AGEN=SDRAM access type 0 or SDRAM access type 1
+					debug(sprintf("  NAND %08X %08X", addr, size));
 				} else {
-					debug(sprintf("  UNKNOWN %08X %08X", addr, size));
+					debug(sprintf("  UNKNOWN %08X %08X [agen=%d]", addr, size, agen));
 				}
 			}
 		}

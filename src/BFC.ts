@@ -93,6 +93,8 @@ export type BfcDisplayInfo = {
 	clientId: number;
 };
 
+export type BfcDisplayBufferType = 'wb' | 'bgr233' | 'bgra4444' | 'bgr565' | 'bgr888' | 'bgra8888' | 'bgra8888p' | 'bgra8888mask';
+
 export type BfcDisplayBufferInfo = {
 	clientId: number;
 	width: number;
@@ -104,9 +106,14 @@ export type BfcDisplayBufferInfo = {
 };
 
 export type BfcDisplayBufferData = IoReadResult & {
-	mode: string;
+	type: BfcDisplayBufferType;
+	displayWidth: number;
+	displayHeight: number;
+	x: number;
+	y: number;
 	width: number;
 	height: number;
+	bpp: number;
 };
 
 export class BFC extends BaseSerialProtocol {
@@ -613,34 +620,60 @@ export class BFC extends BaseSerialProtocol {
 
 	async getDisplayBuffer(displayId: number, options: IoReadWriteOptions = {}): Promise<BfcDisplayBufferData> {
 		const displayInfo = await this.getDisplayInfo(displayId);
+		debug(sprintf(`DISPLAY #%d: %dx%d @ client=%d`, displayId - 1, displayInfo.width, displayInfo.height, displayInfo.clientId));
+
 		const displayBufferInfo = await this.getDisplayBufferInfo(displayInfo.clientId);
+		if (!displayBufferInfo.type)
+			throw new Error(`Display #${displayId - 1} not found!`);
 
-		const modes: Record<number, string> = {
+		const modes: Record<number, BfcDisplayBufferType> = {
 			1:		'wb',
-			2:		'rgb332',
-			3:		'rgba4444',
-			4:		'rgb565',
-			5:		'rgb888',
-			9:		'rgb8888',
+			2:		'bgr233',
+			3:		'bgra4444',
+			4:		'bgr565',
+			5:		'bgra8888',
+			9:		'bgra8888mask',
 		};
 
-		const mode2bpp: Record<string, (w: number, h: number) => number> = {
-			'wb':		(w, h) => Math.floor(Math.floor((w + 7) / 8) * h),
-			'rgb332':	(w, h) => w * h,
-			'rgba4444':	(w, h) => w * h * 2,
-			'rgb565be':	(w, h) => w * h * 2,
-			'rgb565':	(w, h) => w * h * 2,
-			'rgb888':	(w, h) => w * h * 3,
-			'rgb8888':	(w, h) => w * h * 4,
+		const typeToBytesPerPixel: Record<BfcDisplayBufferType, (w: number, h: number) => number> = {
+			'wb':			(w, h) => Math.floor(Math.floor((w + 7) / 8) * h),
+			'bgr233':		(w, h) => w * h,
+			'bgra4444':		(w, h) => w * h * 2,
+			'bgr565':		(w, h) => w * h * 2,
+			'bgr888':		(w, h) => w * h * 3,
+			'bgra8888':		(w, h) => w * h * 4,
+			'bgra8888p':	(w, h) => w * h * 4,
+			'bgra8888mask':	(w, h) => w * h * 4,
 		};
 
-		const rgbMode = modes[displayBufferInfo.type];
-		if (!rgbMode)
+		const type = modes[displayBufferInfo.type];
+		if (!type)
 			throw new Error(`Unknown display buffer type=${displayBufferInfo.type}`);
 
-		const bytes = mode2bpp[rgbMode](displayBufferInfo.width, displayBufferInfo.height);
+		debug(sprintf(
+			`BUFFER: 0x%08X (%d, %d, %dx%d, %s)`,
+			displayBufferInfo.addr,
+			displayBufferInfo.x, displayBufferInfo.y,
+			displayBufferInfo.width, displayBufferInfo.height,
+			type
+		));
+
+		const bpp = typeToBytesPerPixel[type](1, 1);
+		const bytes = typeToBytesPerPixel[type](displayBufferInfo.width, displayBufferInfo.height);
+		debug(sprintf(`BUFFER SIZE: %d bytes [%d bpp]`, bytes, bpp));
+
 		const response = await this.readMemory(displayBufferInfo.addr, bytes, options);
-		return { mode: rgbMode, width: displayBufferInfo.width, height: displayBufferInfo.height, ...response };
+		return {
+			type: type,
+			bpp,
+			displayWidth: displayInfo.width,
+			displayHeight: displayInfo.height,
+			width: displayBufferInfo.width,
+			height: displayBufferInfo.height,
+			x: displayBufferInfo.x,
+			y: displayBufferInfo.y,
+			...response
+		};
 	}
 
 	async sendAT(cmd: string, timeout: number): Promise<string> {

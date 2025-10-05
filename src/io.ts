@@ -94,7 +94,7 @@ export function ioProgressTracker(options: IoProgressOptions) {
 
 	const reportProgressDirect = () => {
 		const elapsed = Date.now() - start;
-		const speed = effectiveSpeed ? effectiveSpeed : currentCursor / (elapsed / 1000);
+		const speed = effectiveSpeed || currentCursor == 0 ? effectiveSpeed : currentCursor / (elapsed / 1000);
 		const remaining = (options.total - currentCursor) / speed;
 
 		options.onProgress && options.onProgress({
@@ -124,7 +124,7 @@ export function ioProgressTracker(options: IoProgressOptions) {
 			lastSpeedCheck = Date.now();
 		}
 
-		if (!options.progressInterval || (Date.now() - lastProgressCalled >= options.progressInterval && cursor > 0)) {
+		if (!options.progressInterval || (Date.now() - lastProgressCalled >= options.progressInterval)) {
 			reportProgressDirect();
 			progressCalled = true;
 		} else {
