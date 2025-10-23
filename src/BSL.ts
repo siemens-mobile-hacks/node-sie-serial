@@ -1,5 +1,6 @@
 import createDebug from 'debug';
 import { AsyncSerialPort } from './AsyncSerialPort.js';
+import { sprintf } from "sprintf-js";
 
 const IGNITION_ON_PERIOD = 50;
 const IGNITION_OFF_PERIOD = 150;
@@ -82,6 +83,9 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 			debug(`Detected CPU: ${CPU_NAMES[cpuType]}`);
 			break;
 		}
+
+		if (response != -1)
+			debug(sprintf("Unexpected response: %02X", response));
 	}
 
 	await port.setSignals({ dtr: options.autoIgnitionInvertPolarity });

@@ -219,7 +219,7 @@ export class ChaosLoader extends BaseSerialProtocol {
 		await this.port.write(Buffer.from([CMD.SET_BAUDRATE, baudrateIndex]));
 		response = await this.port.readByte(100);
 		if (response == -1) {
-			throw new ChaosLoaderError(`setSpeed(${baudRate}): response timeout!`);
+			throw new ChaosLoaderError(`setSpeed(${baudRate}): response timeout! (old speed)`);
 		} else if (response != RESPONSES.BAUDRATE_WAIT_FOR_ACK) {
 			throw new ChaosLoaderError(`setSpeed(${baudRate}): invalid ACK 0x${response.toString(16)}`);
 		}
@@ -231,7 +231,7 @@ export class ChaosLoader extends BaseSerialProtocol {
 		await this.port.write(Buffer.from([CMD.SET_BAUDRATE_ACK, baudrateIndex]));
 		response = await this.port.readByte(100);
 		if (response == -1) {
-			throw new ChaosLoaderError(`setSpeed(${baudRate}): response timeout!`);
+			throw new ChaosLoaderError(`setSpeed(${baudRate}): response timeout! (new speed)`);
 		} else if (response != RESPONSES.BAUDRATE_CHANGED) {
 			throw new ChaosLoaderError(`setSpeed(${baudRate}): invalid ACK 0x${response.toString(16)}`);
 		}

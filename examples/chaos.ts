@@ -8,6 +8,10 @@ const argv = parseArgs({
 			type: "string",
 			default: "/dev/ttyUSB0"
 		},
+		baudrate: {
+			type: "string",
+			default: "1625000"
+		},
 		help: {
 			type: "boolean",
 			short: "h",
@@ -32,7 +36,7 @@ const chaos = new ChaosLoader(port);
 await chaos.connect();
 await chaos.activate();
 await chaos.ping();
-await chaos.setSpeed(1625000);
+await chaos.setSpeed(parseInt(argv.values.baudrate));
 await chaos.ping();
 
 // test reading from flash
