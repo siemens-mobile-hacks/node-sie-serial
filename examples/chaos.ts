@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { ChaosLoader } from "../src/index.js";
 import { openPort } from "./utils.js";
@@ -48,6 +49,8 @@ const result = await chaos.readMemory(0xA0000000, 1024 * 1024 * 64, {
 });
 console.timeEnd("readMemory");
 console.log(result);
+
+fs.writeFileSync("ff.bin", result.buffer)
 
 /*
 // test writing to ram
