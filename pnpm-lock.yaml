@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@serialport/bindings-cpp': npm:@sie-js/node-serialport-bindings-cpp
+
 patchedDependencies:
   '@serialport/bindings-interface':
     hash: 23303df39a158977b3a3d4663860e68d1bfed71932bb1c9e14cb16f119e81329
@@ -20,9 +23,6 @@ importers:
       '@serialport/binding-mock':
         specifier: ^10.2.2
         version: 10.2.2
-      '@serialport/bindings-cpp':
-        specifier: ^13.0.1
-        version: 13.0.1
       '@serialport/bindings-interface':
         specifier: ^1.2.2
         version: 1.2.2(patch_hash=23303df39a158977b3a3d4663860e68d1bfed71932bb1c9e14cb16f119e81329)
@@ -32,6 +32,9 @@ importers:
       '@sie-js/creampie':
         specifier: ^1.0.3
         version: 1.0.3
+      '@sie-js/node-serialport-bindings-cpp':
+        specifier: 0.0.0-development
+        version: 0.0.0-development
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -338,14 +341,6 @@ packages:
     resolution: {integrity: sha512-HAFzGhk9OuFMpuor7aT5G1ChPgn5qSsklTFOTUX72Rl6p0xwcSVsRtG/xaGp6bxpN7fI9D/S8THLBWbBgS6ldw==}
     engines: {node: '>=12.0.0'}
 
-  '@serialport/bindings-cpp@13.0.0':
-    resolution: {integrity: sha512-r25o4Bk/vaO1LyUfY/ulR6hCg/aWiN6Wo2ljVlb4Pj5bqWGcSRC4Vse4a9AcapuAu/FeBzHCbKMvRQeCuKjzIQ==}
-    engines: {node: '>=18.0.0'}
-
-  '@serialport/bindings-cpp@13.0.1':
-    resolution: {integrity: sha512-j8nD5Om5MaQwzptncOiajIKj5RuMy7RiretZYmW4ZpaaLBc5XrapdojjL6AVwhpMWao8iSstlwEx/hpTIAp6mw==}
-    engines: {node: '>=18.0.0'}
-
   '@serialport/bindings-interface@1.2.2':
     resolution: {integrity: sha512-CJaUd5bLvtM9c5dmO9rPBHPXTa9R2UwpkJ0wdh9JCYcbrPWsKz+ErvR0hBLeo7NPeiFdjFO4sonRljiw4d2XiA==}
     engines: {node: ^12.22 || ^14.13 || >=16}
@@ -358,10 +353,6 @@ packages:
     resolution: {integrity: sha512-RErAe57g9gvnlieVYGIn1xymb1bzNXb2QtUQd14FpmbQQYlcrmuRnJwKa1BgTCujoCkhtaTtgHlbBWOxm8U2uA==}
     engines: {node: '>=20.0.0'}
 
-  '@serialport/parser-delimiter@12.0.0':
-    resolution: {integrity: sha512-gu26tVt5lQoybhorLTPsH2j2LnX3AOP2x/34+DUSTNaUTzu2fBXw+isVjQJpUBFWu6aeQRZw5bJol5X9Gxjblw==}
-    engines: {node: '>=12.0.0'}
-
   '@serialport/parser-delimiter@13.0.0':
     resolution: {integrity: sha512-Qqyb0FX1avs3XabQqNaZSivyVbl/yl0jywImp7ePvfZKLwx7jBZjvL+Hawt9wIG6tfq6zbFM24vzCCK7REMUig==}
     engines: {node: '>=20.0.0'}
@@ -373,10 +364,6 @@ packages:
   '@serialport/parser-packet-length@13.0.0':
     resolution: {integrity: sha512-60ZDDIqYRi0Xs2SPZUo4Jr5LLIjtb+rvzPKMJCohrO6tAqSDponcNpcB1O4W21mKTxYjqInSz+eMrtk0LLfZIg==}
     engines: {node: '>=8.6.0'}
-
-  '@serialport/parser-readline@12.0.0':
-    resolution: {integrity: sha512-O7cywCWC8PiOMvo/gglEBfAkLjp/SENEML46BXDykfKP5mTPM46XMaX1L0waWU6DXJpBgjaL7+yX6VriVPbN4w==}
-    engines: {node: '>=12.0.0'}
 
   '@serialport/parser-readline@13.0.0':
     resolution: {integrity: sha512-dov3zYoyf0dt1Sudd1q42VVYQ4WlliF0MYvAMA3MOyiU1IeG4hl0J6buBA2w4gl3DOCC05tGgLDN/3yIL81gsA==}
@@ -404,6 +391,10 @@ packages:
 
   '@sie-js/creampie@1.0.3':
     resolution: {integrity: sha512-NwJzIvCVXxbGuBlnNIqq3PVzmCznaow8LSWFDDfMnW9L8UhfSiNeZY7HBapc3PZzu8sD3aBDzwHCLwD+Mg7Tmg==}
+
+  '@sie-js/node-serialport-bindings-cpp@0.0.0-development':
+    resolution: {integrity: sha512-bLYcFwTjQwSD/Ti2osAIDPAS7aN++3QR4UDpOCH2H40QJVCAbIVRUi8GSUeuHWzYGI1nKTlJUMzVl4Qw/ccO3w==}
+    engines: {node: '>=18.0.0'}
 
   '@types/chai@5.2.2':
     resolution: {integrity: sha512-8kB30R7Hwqf40JPiKhVzodJs2Qc1ZJ5zuT3uzw5Hq/dhNCl3G3l83jfpdI1e20BP348+fV7VIL/+FxaXkqBmWg==}
@@ -873,43 +864,17 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@serialport/bindings-cpp@13.0.0':
-    dependencies:
-      '@serialport/bindings-interface': 1.2.2(patch_hash=23303df39a158977b3a3d4663860e68d1bfed71932bb1c9e14cb16f119e81329)
-      '@serialport/parser-readline': 12.0.0
-      debug: 4.4.0
-      node-addon-api: 8.3.0
-      node-gyp-build: 4.8.4
-    transitivePeerDependencies:
-      - supports-color
-
-  '@serialport/bindings-cpp@13.0.1':
-    dependencies:
-      '@serialport/bindings-interface': 1.2.2(patch_hash=23303df39a158977b3a3d4663860e68d1bfed71932bb1c9e14cb16f119e81329)
-      '@serialport/parser-readline': 13.0.0
-      debug: 4.4.0
-      node-addon-api: 8.3.0
-      node-gyp-build: 4.8.4
-    transitivePeerDependencies:
-      - supports-color
-
   '@serialport/bindings-interface@1.2.2(patch_hash=23303df39a158977b3a3d4663860e68d1bfed71932bb1c9e14cb16f119e81329)': {}
 
   '@serialport/parser-byte-length@13.0.0': {}
 
   '@serialport/parser-cctalk@13.0.0': {}
 
-  '@serialport/parser-delimiter@12.0.0': {}
-
   '@serialport/parser-delimiter@13.0.0': {}
 
   '@serialport/parser-inter-byte-timeout@13.0.0': {}
 
   '@serialport/parser-packet-length@13.0.0': {}
-
-  '@serialport/parser-readline@12.0.0':
-    dependencies:
-      '@serialport/parser-delimiter': 12.0.0
 
   '@serialport/parser-readline@13.0.0':
     dependencies:
@@ -931,6 +896,16 @@ snapshots:
       - supports-color
 
   '@sie-js/creampie@1.0.3': {}
+
+  '@sie-js/node-serialport-bindings-cpp@0.0.0-development':
+    dependencies:
+      '@serialport/bindings-interface': 1.2.2(patch_hash=23303df39a158977b3a3d4663860e68d1bfed71932bb1c9e14cb16f119e81329)
+      '@serialport/parser-readline': 13.0.0
+      debug: 4.4.0
+      node-addon-api: 8.3.0
+      node-gyp-build: 4.8.4
+    transitivePeerDependencies:
+      - supports-color
 
   '@types/chai@5.2.2':
     dependencies:
@@ -1133,7 +1108,7 @@ snapshots:
   serialport@13.0.0:
     dependencies:
       '@serialport/binding-mock': 10.2.2
-      '@serialport/bindings-cpp': 13.0.0
+      '@serialport/bindings-cpp': '@sie-js/node-serialport-bindings-cpp@0.0.0-development'
       '@serialport/parser-byte-length': 13.0.0
       '@serialport/parser-cctalk': 13.0.0
       '@serialport/parser-delimiter': 13.0.0

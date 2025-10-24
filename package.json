@@ -24,10 +24,10 @@
 	},
 	"devDependencies": {
 		"@serialport/binding-mock": "^10.2.2",
-		"@serialport/bindings-cpp": "^13.0.1",
 		"@serialport/bindings-interface": "^1.2.2",
 		"@serialport/stream": "^13.0.0",
 		"@sie-js/creampie": "^1.0.3",
+		"@sie-js/node-serialport-bindings-cpp": "0.0.0-development",
 		"@types/debug": "^4.1.12",
 		"@types/node": "^22.18.8",
 		"@types/sprintf-js": "^1.1.4",
@@ -47,6 +47,9 @@
 	"pnpm": {
 		"patchedDependencies": {
 			"@serialport/bindings-interface": "patches/@serialport__bindings-interface.patch"
+		},
+		"overrides": {
+			"@serialport/bindings-cpp": "npm:@sie-js/node-serialport-bindings-cpp"
 		}
 	}
 }
