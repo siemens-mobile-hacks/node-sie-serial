@@ -51,6 +51,18 @@ console.log(foundKeys);
 dwd.setKeys("auto");
 await dwd.connect();
 
+console.log(sprintf("SCU_ID0=%08X", (await dwd.readMemory(0xF4400000 + 0x06C, 4)).buffer.readUInt32LE(0)));
+console.log(sprintf("SCU_ID1=%08X", (await dwd.readMemory(0xF4400000 + 0x070, 4)).buffer.readUInt32LE(0)));
+console.log(sprintf("SCU_BOOT_CFG=%08X", (await dwd.readMemory(0xF4400000 + 0x074, 4)).buffer.readUInt32LE(0)));
+console.log(sprintf("SCU_MANID=%08X", (await dwd.readMemory(0xF4400000 + 0x05C, 4)).buffer.readUInt32LE(0)));
+console.log(sprintf("SCU_CHIPID=%08X", (await dwd.readMemory(0xF4400000 + 0x060, 4)).buffer.readUInt32LE(0)));
+
+
+// decodeMMU(await readMmuTable(dwd));
+
+// await dwd.readMemory(0x00400000, 4);
+
+/*
 console.log(await dwd.getSWVersion());
 
 for (let i = 0; i < 64; i++) {
@@ -59,7 +71,7 @@ for (let i = 0; i < 64; i++) {
 	console.log(sprintf("%08X %08X", 0xF0000000 + i * 4, r.buffer.readUInt32LE(0)));
 }
 console.log(await dwd.getMemoryRegions());
-
+*/
 /*
 const abortController = new AbortController();
 
@@ -82,3 +94,146 @@ fs.writeFileSync("/tmp/ff.bin", result.buffer);
 await dwd.disconnect();
 
 await port.close();
+
+type MMUTableRow = {
+	type: number;
+	addr: number;
+	size: number;
+	phys: number;
+	domain?: number;
+	AP?: number;
+	C?: boolean;
+	B?: boolean;
+	table?: MMUTableRow[];
+};
+
+async function readMmuTable(dwd: DWD) {
+	// Read 1st level descriptors
+	const response = await dwd.readMemory(16 * 1024 * 0, 16 * 1024);
+
+	const mmuTable: MMUTableRow[] = [];
+	for (let i = 0; i < 4096; i++) {
+		const value = response.buffer.readUInt32LE(i * 4);
+		const addr = i * 1024 * 1024;
+		const size = 1024 * 1024;
+		const type = value & 0b11;
+
+		switch (type) {
+			case 1: // Coarse
+			{
+				const phys = (value & 0xFFFFFC00) >>> 0;
+				const domain = (value >>> 5) & 0b1111;
+				const AP = (value >> 10) & 0b11;
+				mmuTable[i] = { type, addr, size, phys, domain, AP };
+			}
+			break;
+
+			case 2: // Section
+			{
+				const phys = (value & 0xFFF00000) >>> 0;
+				const domain = (value >>> 5) & 0b1111;
+				const C = (value & (1 << 3)) != 0;
+				const B = (value & (1 << 2)) != 0;
+				const AP = (value >> 10) & 0b11;
+				mmuTable[i] = { type, addr, size, phys, domain, AP, C, B };
+			}
+			break;
+
+			case 3: // Fine
+			{
+				const phys = (value & 0xFFFFF000) >>> 0;
+				const domain = (value >>> 5) & 0b1111;
+				mmuTable[i] = { type, addr, size, phys, domain };
+			}
+			break;
+		}
+	}
+
+	// Read 2nd level descriptors
+	for (const row of mmuTable) {
+		if (row == null)
+			continue;
+
+		if (row.type == 1 || row.type == 3) {
+			const subTableSize = (row.type == 3 ? 1024 * 4 : 256 * 4);
+			const subTableCnt = subTableSize / 4;
+			const subTableEntrySize = (1024 * 1024) / subTableCnt;
+
+			const response = await dwd.readMemory(row.phys, subTableSize);
+
+			const subTable: MMUTableRow[] = [];
+			for (let i = 0; i < subTableCnt; i++) {
+				const value = response.buffer.readUInt32LE(i * 4);
+				const type = value & 0b11;
+				const addr = row.addr + i * subTableEntrySize;
+
+				switch (type) {
+					case 1:
+					{
+						const phys = (value & 0xFFFF0000) >>> 0;
+						const C = (value & (1 << 3)) != 0;
+						const B = (value & (1 << 2)) != 0;
+						const AP = (value >> 4) & 0xFF;
+						subTable[i] = { addr, type, phys, C, B, AP, size: 64 * 1024 };
+					}
+					break;
+
+					case 2:
+					{
+						const phys = (value & 0xFFFFF000) >>> 0;
+						const C = (value & (1 << 3)) != 0;
+						const B = (value & (1 << 2)) != 0;
+						const AP = (value >> 4) & 0xFF;
+						subTable[i] = { addr, type, phys, C, B, AP, size: 4 * 1024 };
+					}
+					break;
+
+					case 3:
+					{
+						const phys = (value & 0xFFFFFC00) >>> 0;
+						const C = (value & (1 << 3)) != 0;
+						const B = (value & (1 << 2)) != 0;
+						const AP = (value >> 4) & 0b11;
+						subTable[i] = { addr, type, phys, C, B, AP, size: 4 * 1024 };
+					}
+					break;
+				}
+			}
+			row.table = subTable;
+		}
+	}
+
+	return mmuTable;
+}
+
+function decodeMMU(table: MMUTableRow[]) {
+	const types: string[] = [
+		'[Fault]  ',
+		'[Coarse] ',
+		'[Section]',
+		'[Fine]   ',
+	];
+	for (const row of table) {
+		if (row == null)
+			continue;
+
+		switch (row.type) {
+			case 1:
+				console.log(sprintf("%s   %08X -> %08X D[%X] AP[%X]", types[row.type], row.addr, row.phys, row.domain ?? 0, row.AP));
+				break;
+
+			case 2:
+				console.log(sprintf("%s   %08X -> %08X D[%X] AP[%X] %s%s",
+									types[row.type], row.addr, row.phys, row.domain ?? "", row.AP, (row.C ? "C" : "-"), (row.B ? "B" : "-")));
+				break;
+
+			case 3:
+				console.log(sprintf("%s   %08X -> %08X D[%X] AP[%X]", types[row.type], row.addr, row.phys, row.domain ?? 0, row.AP));
+				break;
+		}
+
+		if (row.table) {
+			decodeMMU(row.table);
+		}
+	}
+}

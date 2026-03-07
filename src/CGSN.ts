@@ -68,7 +68,7 @@ export type CgsnGetMemoryRegionsResponse = CgsnBaseResponse<{
 }>;
 
 export class CGSN extends BaseSerialProtocol {
-	private readonly atc: AtChannel = new AtChannel();
+	private readonly atc: AtChannel = new AtChannel(this.port);
 	private connectionType: string = "";
 	private isConnected = false;
 
@@ -76,7 +76,6 @@ export class CGSN extends BaseSerialProtocol {
 		if (this.isConnected)
 			await this.disconnect();
 
-		this.atc.attachSerialPort(this.port);
 		this.atc.start();
 		testBaudRates ||= SERIAL_BAUD_RATES;
 		for (const baudRate of testBaudRates) {
@@ -426,7 +425,6 @@ export class CGSN extends BaseSerialProtocol {
 		if (this.isConnected && this.port.isOpen)
 			await this.setBaudRate(115200);
 		this.atc.stop();
-		this.atc.detachSerialPort();
 		this.isConnected = false;
 	}
 }

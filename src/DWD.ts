@@ -453,7 +453,7 @@ export class DWD extends BaseSerialProtocol {
 		request.writeUInt16LE(RAND4, 2);
 		request.writeUInt16LE((keys.key1[0xF - keyRotate] ^ keys.key3[keyRotate] << 4 ^ 0x4d33) & 0xFFFF, 4);
 		request.writeUInt16LE(RAND4, 6);
-		console.log(await this.execCommand(request, FrameType.CONNECT2_RESP, timeout));
+		await this.execCommand(request, FrameType.CONNECT2_RESP, timeout);
 	}
 
 	newRequest(frameId: FrameType, payloadLength: number = 0): Buffer {
