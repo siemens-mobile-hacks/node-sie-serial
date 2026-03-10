@@ -93,7 +93,7 @@ export type BfcDisplayInfo = {
 	clientId: number;
 };
 
-export type BfcDisplayBufferType = 'wb' | 'bgr233' | 'bgra4444' | 'bgr565' | 'bgr888' | 'bgra8888' | 'bgra8888p' | 'bgra8888mask';
+export type BfcDisplayBufferType = 'wb' | 'bgr233' | 'bgra4444' | 'bgr565' | 'bgr888' | 'bgra8888' | 'bgra8888p' | 'bgra8888+yuv';
 
 export type BfcDisplayBufferInfo = {
 	clientId: number;
@@ -123,7 +123,7 @@ export class BFC extends BaseSerialProtocol {
 	private buffer = Buffer.alloc(0);
 	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
 	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
-	private readonly atc = new AtChannel();
+	private readonly atc = new AtChannel(this.port);
 
 	private setTransportMode(mode: BfcTransportMode): void {
 		if (this.mode == mode)
@@ -136,7 +136,6 @@ export class BFC extends BaseSerialProtocol {
 				this.port.off('data', this.handleSerialDataCallback);
 				this.port.off('close', this.handleSerialCloseCallback);
 				this.atc.stop();
-				this.atc.detachSerialPort();
 				this.buffer = Buffer.alloc(0);
 			break;
 
@@ -144,7 +143,6 @@ export class BFC extends BaseSerialProtocol {
 				debug(`Mode: AT`);
 				this.port.off('data', this.handleSerialDataCallback);
 				this.port.off('close', this.handleSerialCloseCallback);
-				this.atc.attachSerialPort(this.port);
 				this.atc.start();
 				this.buffer = Buffer.alloc(0);
 			break;
@@ -154,7 +152,6 @@ export class BFC extends BaseSerialProtocol {
 				this.port.on('data', this.handleSerialDataCallback);
 				this.port.on('close', this.handleSerialCloseCallback);
 				this.atc.stop();
-				this.atc.detachSerialPort();
 			break;
 		}
 	}
@@ -632,7 +629,7 @@ export class BFC extends BaseSerialProtocol {
 			3:		'bgra4444',
 			4:		'bgr565',
 			5:		'bgra8888',
-			9:		'bgra8888mask',
+			9:		'bgra8888+yuv',
 		};
 
 		const typeToBytesPerPixel: Record<BfcDisplayBufferType, (w: number, h: number) => number> = {
@@ -643,7 +640,7 @@ export class BFC extends BaseSerialProtocol {
 			'bgr888':		(w, h) => w * h * 3,
 			'bgra8888':		(w, h) => w * h * 4,
 			'bgra8888p':	(w, h) => w * h * 4,
-			'bgra8888mask':	(w, h) => w * h * 4,
+			'bgra8888+yuv':	(w, h) => w * h * 4,
 		};
 
 		const type = modes[displayBufferInfo.type];
