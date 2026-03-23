@@ -93,7 +93,7 @@ export type BfcDisplayInfo = {
 	clientId: number;
 };
 
-export type BfcDisplayBufferType = 'wb' | 'bgr233' | 'bgra4444' | 'bgr565' | 'bgr888' | 'bgra8888' | 'bgra8888p' | 'bgra8888+yuv';
+export type BfcDisplayBufferType = 'wb' | 'rgb332' | 'argb4444' | 'rgb565' | 'rgb888' | 'argb8888' | 'argb8888p' | 'argb8888+yuv';
 
 export type BfcDisplayBufferInfo = {
 	clientId: number;
@@ -625,22 +625,22 @@ export class BFC extends BaseSerialProtocol {
 
 		const modes: Record<number, BfcDisplayBufferType> = {
 			1:		'wb',
-			2:		'bgr233',
-			3:		'bgra4444',
-			4:		'bgr565',
-			5:		'bgra8888',
-			9:		'bgra8888+yuv',
+			2:		'rgb332',
+			3:		'argb4444',
+			4:		'rgb565',
+			5:		'argb8888',
+			9:		'argb8888+yuv',
 		};
 
 		const typeToBytesPerPixel: Record<BfcDisplayBufferType, (w: number, h: number) => number> = {
 			'wb':			(w, h) => Math.floor(Math.floor((w + 7) / 8) * h),
-			'bgr233':		(w, h) => w * h,
-			'bgra4444':		(w, h) => w * h * 2,
-			'bgr565':		(w, h) => w * h * 2,
-			'bgr888':		(w, h) => w * h * 3,
-			'bgra8888':		(w, h) => w * h * 4,
-			'bgra8888p':	(w, h) => w * h * 4,
-			'bgra8888+yuv':	(w, h) => w * h * 4,
+			'rgb332':		(w, h) => w * h,
+			'argb4444':		(w, h) => w * h * 2,
+			'rgb565':		(w, h) => w * h * 2,
+			'rgb888':		(w, h) => w * h * 3,
+			'argb8888':		(w, h) => w * h * 4,
+			'argb8888p':	(w, h) => w * h * 4,
+			'argb8888+yuv':	(w, h) => w * h * 4,
 		};
 
 		const type = modes[displayBufferInfo.type];
