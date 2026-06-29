@@ -84,7 +84,8 @@ while (true) {
 		continue;
 	if (byte == 0)
 		break;
-	process.stdout.write(Buffer.from([byte]));
+	console.log(byte.toString(16).padStart(2, '0'));
+	// process.stdout.write(Buffer.from([byte]));
 }
 
 await port.close();

@@ -16,6 +16,9 @@ importers:
 
   .:
     dependencies:
+      '@sie-js/node-serialport-bindings-cpp':
+        specifier: ^0.0.2
+        version: 0.0.2
       sprintf-js:
         specifier: ^1.1.3
         version: 1.1.3
@@ -32,9 +35,6 @@ importers:
       '@sie-js/creampie':
         specifier: ^1.0.3
         version: 1.0.3
-      '@sie-js/node-serialport-bindings-cpp':
-        specifier: 0.0.0-development
-        version: 0.0.0-development
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -407,8 +407,8 @@ packages:
   '@sie-js/creampie@1.0.3':
     resolution: {integrity: sha512-NwJzIvCVXxbGuBlnNIqq3PVzmCznaow8LSWFDDfMnW9L8UhfSiNeZY7HBapc3PZzu8sD3aBDzwHCLwD+Mg7Tmg==}
 
-  '@sie-js/node-serialport-bindings-cpp@0.0.0-development':
-    resolution: {integrity: sha512-bLYcFwTjQwSD/Ti2osAIDPAS7aN++3QR4UDpOCH2H40QJVCAbIVRUi8GSUeuHWzYGI1nKTlJUMzVl4Qw/ccO3w==}
+  '@sie-js/node-serialport-bindings-cpp@0.0.2':
+    resolution: {integrity: sha512-GJGMZjkHJD4ZRpRyZxQCuM0pJvTPC5E4wX1FIjzlfGwEblBDTJlleUD5WIrk9Z7EB1b8brvbCzkl5Yb/CJYZnw==}
     engines: {node: '>=18.0.0'}
 
   '@types/chai@5.2.3':
@@ -921,7 +921,7 @@ snapshots:
 
   '@sie-js/creampie@1.0.3': {}
 
-  '@sie-js/node-serialport-bindings-cpp@0.0.0-development':
+  '@sie-js/node-serialport-bindings-cpp@0.0.2':
     dependencies:
       '@serialport/bindings-interface': 1.2.2(patch_hash=23303df39a158977b3a3d4663860e68d1bfed71932bb1c9e14cb16f119e81329)
       '@serialport/parser-readline': 13.0.0
@@ -1136,7 +1136,7 @@ snapshots:
   serialport@13.0.0:
     dependencies:
       '@serialport/binding-mock': 10.2.2
-      '@serialport/bindings-cpp': '@sie-js/node-serialport-bindings-cpp@0.0.0-development'
+      '@serialport/bindings-cpp': '@sie-js/node-serialport-bindings-cpp@0.0.2'
       '@serialport/parser-byte-length': 13.0.0
       '@serialport/parser-cctalk': 13.0.0
       '@serialport/parser-delimiter': 13.0.0

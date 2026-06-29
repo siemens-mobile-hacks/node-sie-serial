@@ -1,0 +1,8 @@
+packages:
+  - .
+
+patchedDependencies:
+  '@serialport/bindings-interface': patches/@serialport__bindings-interface.patch
+
+overrides:
+  '@serialport/bindings-cpp': 'npm:@sie-js/node-serialport-bindings-cpp'
