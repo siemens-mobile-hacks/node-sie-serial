@@ -54,8 +54,8 @@ importers:
         specifier: ^13.0.0
         version: 13.0.0
       serialport-bindings-socket:
-        specifier: ^1.0.1
-        version: 1.0.1
+        specifier: ^1.0.4
+        version: 1.0.4
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
@@ -579,8 +579,8 @@ packages:
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
 
-  serialport-bindings-socket@1.0.1:
-    resolution: {integrity: sha512-4W0totwEDLUPljnMSlnn0xdf+YIZYAE9x6SPwVmEazknyB2TacycKpTRscdhOIY+6us75lrxecNUpEIR1D31YA==}
+  serialport-bindings-socket@1.0.4:
+    resolution: {integrity: sha512-IsUwMFOIa7iNrqJz5KHesv94HlRejIhjAdz6any9s/YIJ7imxLyYPok2AzCslKbg9cY0kXLWE7og4hSTiitktw==}
 
   serialport@13.0.0:
     resolution: {integrity: sha512-PHpnTd8isMGPfFTZNCzOZp9m4mAJSNWle9Jxu6BPTcWq7YXl5qN7tp8Sgn0h+WIGcD6JFz5QDgixC2s4VW7vzg==}
@@ -1119,7 +1119,7 @@ snapshots:
       '@rollup/rollup-win32-x64-msvc': 4.62.2
       fsevents: 2.3.3
 
-  serialport-bindings-socket@1.0.1: {}
+  serialport-bindings-socket@1.0.4: {}
 
   serialport@13.0.0:
     dependencies:
