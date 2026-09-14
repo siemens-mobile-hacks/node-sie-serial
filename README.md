@@ -46,4 +46,3 @@ We are not against AI. We are against vibe coding, AI slop, and attempts to offl
    Follow KISS, the project's coding style, and its existing architecture. Do not introduce unnecessary abstractions, dependencies, or untested changes.
 
 AI slop PRs will be closed without review.
-sed without review. Arguing about these rules is pointless.
