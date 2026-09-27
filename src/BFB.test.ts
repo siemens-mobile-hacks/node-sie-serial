@@ -125,6 +125,12 @@ describeHardware('BFB hardware', () => {
 		expect(['REPAIR', 'DEVELOPER', 'FACTORY', 'CUSTOMER']).toContain(await bfb.getSecurityModeName());
 	});
 
+	test('reads display size', async () => {
+		const size = await bfb.getDisplaySize();
+		expect(size.width).toBeGreaterThan(0);
+		expect(size.height).toBeGreaterThan(0);
+	});
+
 	test('reads display buffer', async () => {
 		const display = await bfb.getDisplayBuffer();
 		expect(display.bufferAddress).toBeGreaterThan(0);

@@ -56,6 +56,7 @@ try {
 	await printValue('HWID', async () => (await bfb.getHardwareId()).toString(16).padStart(4, '0').toUpperCase());
 	await printValue('ESN', async () => (await bfb.getFlashSerialNumber()).toString(16).padStart(8, '0').toUpperCase());
 	await printValue('DISPLAY TYPE', () => bfb.getDisplayType());
+	await printValue('DISPLAY SIZE', () => bfb.getDisplaySize());
 	await printValue('DISPLAY BUFFER', async () => {
 		const address = await bfb.getDisplayBufferAddress();
 		return `0x${address.toString(16).padStart(8, '0').toUpperCase()}`;

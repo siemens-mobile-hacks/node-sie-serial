@@ -968,19 +968,43 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getDisplaySize(timeout = 5000): Promise<BfbDisplaySize> {
-		const { promise, resolve, reject } = usePromiseWithResolvers<BfbDisplaySize>();
-		const timeoutId = setTimeout(() => reject(new Error('Timed out waiting for BFB display size.')), timeout);
+		const { promise, resolve } = usePromiseWithResolvers<BfbDisplaySize>();
+		const deadline = Date.now() + timeout;
+		let acceptEvent = false;
+		let candidate: BfbDisplaySize | undefined;
+		let confirmations = 0;
 		let redirected = false;
 		try {
-			await this.updateDisplay(0, 0, 0xFFFF, 0xFFFF);
-			await this.redirectDisplay((event) => resolve({
-				width: event.right - event.left + 1,
-				height: event.bottom - event.top + 1,
-			}));
+			await this.redirectDisplay((event) => {
+				if (!acceptEvent || event.left != 0 || event.top != 0)
+					return;
+				const size = {
+					width: event.right - event.left + 1,
+					height: event.bottom - event.top + 1,
+				};
+				if (candidate?.width == size.width && candidate.height == size.height) {
+					confirmations++;
+				} else {
+					candidate = size;
+					confirmations = 1;
+				}
+				if (confirmations >= 2)
+					resolve(size);
+			});
 			redirected = true;
-			return await promise;
+			acceptEvent = true;
+			while (Date.now() < deadline) {
+				await this.updateDisplay(0, 0, 0xFFFF, 0xFFFF);
+				const remaining = deadline - Date.now();
+				const size = await Promise.race([
+					promise,
+					delay(Math.min(100, Math.max(0, remaining))).then(() => undefined),
+				]);
+				if (size)
+					return size;
+			}
+			throw new Error('Timed out waiting for BFB display size.');
 		} finally {
-			clearTimeout(timeoutId);
 			if (redirected)
 				await this.restoreDisplay();
 		}
