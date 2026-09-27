@@ -6,3 +6,7 @@ patchedDependencies:
 
 overrides:
   '@serialport/bindings-cpp': 'npm:@sie-js/node-serialport-bindings-cpp'
+
+allowBuilds:
+  '@sie-js/node-serialport-bindings-cpp': true
+  esbuild: true
