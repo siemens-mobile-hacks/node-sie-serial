@@ -2,7 +2,7 @@ import createDebug from 'debug';
 import { crc16 } from './crc16.js';
 import { AtChannel, AtCommandResponse } from './AtChannel.js';
 import { sprintf } from 'sprintf-js';
-import { decodeCString, usePromiseWithResolvers } from './utils.js';
+import { decodeCString, delay, usePromiseWithResolvers } from './utils.js';
 import { ioReadMemory, IoReadResult, IoReadWriteOptions } from "./io.js";
 import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
 
@@ -165,7 +165,7 @@ export class BFC extends BaseSerialProtocol {
 			await this.sendFrame(DEFAULT_CHANNEL_ID, 0x02, BfcFrameTypes.STATUS, 0, [0x80, 0x11]);
 			await this.sendFrame(DEFAULT_CHANNEL_ID, 0x02, BfcFrameTypes.STATUS, 0, [0x80, 0x11]);
 			if (await this.ping(300)) {
-				await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for BFC is ready
+				await delay(2000); // Wait for BFC is ready
 				debug(`Phone is already in BFC mode!`);
 				return baudRate;
 			}
@@ -193,7 +193,7 @@ export class BFC extends BaseSerialProtocol {
 			response = await this.atc.sendCommandNumeric("AT^SQWE=1");
 			if (response.success) {
 				this.setTransportMode(BfcTransportMode.BFC);
-				await new Promise((resolve) => setTimeout(resolve, 300)); // Wait for BFC is ready
+				await delay(300); // Wait for BFC is ready
 				if (await this.ping()) {
 					debug(`Successfully switched to BFC mode!`);
 					return true;
@@ -236,7 +236,7 @@ export class BFC extends BaseSerialProtocol {
 				try {
 					await this.sendAT("AT^SQWE = 0\r", 250);
 					await this.port.update({ baudRate: 115200 });
-					await new Promise((resolve) => setTimeout(resolve, 300));
+					await delay(300);
 				} catch (e) {
 					if (e instanceof Error) {
 						debug(`disconnect error: ${e.message}`);
@@ -470,7 +470,7 @@ export class BFC extends BaseSerialProtocol {
 		}
 
 		if (foundBestBaudrate) {
-			await new Promise((resolve) => setTimeout(resolve, 300));
+			await delay(300);
 			await this.port.update({ baudRate: foundBestBaudrate });
 
 			for (let i = 0; i < 3; i++) {
@@ -482,7 +482,7 @@ export class BFC extends BaseSerialProtocol {
 			}
 
 			await this.port.update({ baudRate: prevBaudRate });
-			await new Promise((resolve) => setTimeout(resolve, 100));
+			await delay(100);
 
 			debug(`Failed to set new baudrate.`);
 			return false;

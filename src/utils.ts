@@ -38,13 +38,12 @@ export function usePromiseWithResolvers<T>() {
 }
 
 export function decodeCString(buffer: Buffer): string {
-	let len = 0;
-	for (let i = 1; i < buffer.length; i++) {
-		if (buffer[i] == 0)
-			break;
-		len++;
-	}
-	return buffer.subarray(0, len + 1).toString();
+	const zero = buffer.indexOf(0);
+	return buffer.subarray(0, zero < 0 ? buffer.length : zero).toString();
+}
+
+export function delay(timeout: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, timeout));
 }
 
 export async function retryAsync<T>(callback: () => Promise<T>, options: { max: number, until: (lastResult: T) => boolean }) {
