@@ -20,4 +20,4 @@ jobs:
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: npm publish --access public --no-git-checks
+      - run: pnpm publish --access public --no-git-checks
