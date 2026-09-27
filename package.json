@@ -8,7 +8,11 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"build": "tsc",
-		"watch": "tsc -w"
+		"watch": "tsc -w",
+		"docs:bfb-status": "node tools/generateBfbImplementationStatus.mjs",
+		"check:bfb-command-coverage": "node tools/checkBfbCommandCoverage.mjs",
+		"check:bfb-hardware-coverage": "node tools/checkBfbHardwareCoverage.mjs",
+		"test:bfb-hardware": "BFB_HARDWARE=1 vitest run src/BFB.test.ts"
 	},
 	"author": "kirill.zhumarin@gmail.com",
 	"license": "MIT",
