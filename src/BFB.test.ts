@@ -8,8 +8,10 @@ import {
 	BfbChannel,
 	BfbCommandTimeoutError,
 	BfbCoreOpcode,
+	BfbDisplayDiagnosticSelector,
 	BfbHardwareOpcode,
 	BfbRemoteError,
+	BfbRfMeasurementCommand,
 	BfbSecurityMode,
 	BfbUnsupportedCommandError,
 	encodeBfbFrame,
@@ -123,6 +125,32 @@ describeHardware('BFB hardware', () => {
 		expect(['REPAIR', 'DEVELOPER', 'FACTORY', 'CUSTOMER']).toContain(await bfb.getSecurityModeName());
 	});
 
+	test('reads display buffer', async () => {
+		const display = await bfb.getDisplayBuffer();
+		expect(display.bufferAddress).toBeGreaterThan(0);
+		expect(display.width).toBeGreaterThan(0);
+		expect(display.height).toBeGreaterThan(0);
+		expect(display.bpp).toBeGreaterThan(0);
+		let expectedType = 'wb';
+		if (display.bpp == 2) {
+			expectedType = 'argb4444';
+		} else if (display.bpp == 1 && await bfb.getPhoneModel() == 'S55') {
+			expectedType = 'rgb332';
+		}
+		expect(display.type).toBe(expectedType);
+		const expectedSize = display.type == 'wb' ? Math.floor((display.width + 7) / 8) * display.height :
+			display.width * display.height * display.bpp;
+		expect(display.buffer).toHaveLength(expectedSize);
+	});
+
+	test('runs read-only hardware diagnostics', async () => {
+		await bfb.noOp();
+		const display = await bfb.displayDriverDiagnostic(BfbDisplayDiagnosticSelector.GET_BYTES_PER_PIXEL);
+		expect(display).toHaveLength(2);
+		expect(display[1]).toBeGreaterThan(0);
+		expect(await bfb.rfMeasurement(BfbRfMeasurementCommand.GET_CHANNEL_MAP)).toHaveLength(16);
+	});
+
 	test('reads all hardware info selectors', async () => {
 		for (let selector = 0; selector <= 9; selector++)
 			expect(await bfb.getHardwareInfo(selector)).toBeGreaterThanOrEqual(0);
@@ -132,7 +160,6 @@ describeHardware('BFB hardware', () => {
 		['hardware data', () => bfb.getHardwareData(0)],
 		['audio gain shadow', () => bfb.getAudioGainShadow()],
 		['normal-mode RX level', () => bfb.getNormalModeRxLevel()],
-		['B35 software version', () => bfb.getB35SoftwareVersion()],
 	];
 	test.each(optionalReaders)('reads optional %s or reports unsupported', async (_name, callback) => {
 		await expectSupportedOrUnsupported(callback);
@@ -169,6 +196,13 @@ describeHardware('BFB hardware', () => {
 		expect(buffer.subarray(4, 35)).toEqual(result.buffer.subarray(0, 31));
 	});
 
+	test('reads C166 memory regions', async () => {
+		const regions = await bfb.getMemoryRegions();
+		expect(regions.some((region) => region.name.startsWith('RAM'))).toBe(true);
+		expect(regions.some((region) => region.name.startsWith('FLASH'))).toBe(true);
+		expect(regions.reduce((size, region) => size + region.size, 0)).toBe(0x01000000);
+	});
+
 	test('reads confirmed AMC modes 1-3 with zero selectors', async () => {
 		expect(await bfb.amcAdvanced(1, [0, 0])).toEqual(expect.any(Number));
 		expect(await bfb.ping()).toBe(true);
@@ -200,7 +234,7 @@ describeHardware('BFB hardware', () => {
 		expect(eefullSpace.freeAddressSpace).toBeGreaterThan(0);
 		expect(eefullSpace.freeDataSpace).toBeGreaterThan(0);
 
-		const info = await bfb.getEepBlockInfo(1, 'eelite');
+		const info = await bfb.getEepBlockInfo(1);
 		const data = await bfb.readEepBlock(1, 0, Math.min(info.size, 16));
 		expect(data).toHaveLength(Math.min(info.size, 16));
 
@@ -208,7 +242,7 @@ describeHardware('BFB hardware', () => {
 		let chunkedInfo;
 		for (let blockId = 5000; blockId <= eefullMaxBlockId; blockId++) {
 			try {
-				const info = await bfb.getEepBlockInfo(blockId, 'eefull');
+				const info = await bfb.getEepBlockInfo(blockId);
 				if (info.size > 30) {
 					chunkedBlockId = blockId;
 					chunkedInfo = info;
@@ -225,9 +259,9 @@ describeHardware('BFB hardware', () => {
 			throw new Error('No readable EEFULL block larger than 30 bytes.');
 		expect(chunkedInfo.size).toBeGreaterThan(30);
 		const chunkedLength = Math.min(chunkedInfo.size, 61);
-		const chunkedData = await bfb.readEepBlock(chunkedBlockId, 0, chunkedLength, 'eefull');
+		const chunkedData = await bfb.readEepBlock(chunkedBlockId, 0, chunkedLength);
 		expect(chunkedData).toHaveLength(chunkedLength);
-		expect(await bfb.readEepBlock(chunkedBlockId, 30, chunkedLength - 30, 'eefull'))
+		expect(await bfb.readEepBlock(chunkedBlockId, 30, chunkedLength - 30))
 			.toEqual(chunkedData.subarray(30));
 	}, 60000);
 
@@ -252,7 +286,7 @@ describeHardware('BFB hardware', () => {
 		let blockId: number | undefined;
 		for (let candidate = maxBlockId; candidate >= 5000; candidate--) {
 			try {
-				await bfb.getEepBlockInfo(candidate, 'eefull');
+				await bfb.getEepBlockInfo(candidate);
 			} catch (error) {
 				if (!(error instanceof BfbRemoteError) || error.status != 0x32)
 					throw error;
@@ -274,32 +308,32 @@ describeHardware('BFB hardware', () => {
 		patch.copy(expected, 17);
 
 		try {
-			await expect(bfb.getEepBlockInfo(blockId, 'eefull')).rejects.toMatchObject({ status: 0x32 });
-			await bfb.createEepBlock(blockId, initial.length, 0x5A, 'eefull');
+			await expect(bfb.getEepBlockInfo(blockId)).rejects.toMatchObject({ status: 0x32 });
+			await bfb.createEepBlock(blockId, initial.length, 0x5A);
 			for (let offset = 0; offset < initial.length; offset += 26)
-				await bfb.writeEepBlockChunk(blockId, offset, initial.subarray(offset, offset + 26), 'eefull');
-			await bfb.finishEepBlock(blockId, 'eefull');
-			expect(await bfb.getEepBlockInfo(blockId, 'eefull')).toEqual({
+				await bfb.writeEepBlockChunk(blockId, offset, initial.subarray(offset, offset + 26));
+			await bfb.finishEepBlock(blockId);
+			expect(await bfb.getEepBlockInfo(blockId)).toEqual({
+				id: blockId,
 				size: initial.length,
 				version: 0x5A,
-				storage: 'eefull',
 			});
-			expect(await bfb.readEepBlock(blockId, 0, initial.length, 'eefull')).toEqual(initial);
-			expect(await bfb.readEepBlockChunk(blockId, 0, 30, 'eefull')).toEqual(initial.subarray(0, 30));
+			expect(await bfb.readEepBlock(blockId, 0, initial.length)).toEqual(initial);
+			expect(await bfb.readEepBlockChunk(blockId, 0, 30)).toEqual(initial.subarray(0, 30));
 
 			await bfb.writeEefullBlockRangeChunk(blockId, 17, patch.subarray(0, 26));
 			await bfb.writeEepBlockRange(blockId, 43, patch.subarray(26));
-			expect(await bfb.readEepBlock(blockId, 0, expected.length, 'eefull')).toEqual(expected);
+			expect(await bfb.readEepBlock(blockId, 0, expected.length)).toEqual(expected);
 		} finally {
 			try {
-				await bfb.deleteEepBlock(blockId, 'eefull');
+				await bfb.deleteEepBlock(blockId);
 			} catch (error) {
 				if (!(error instanceof BfbRemoteError) || error.status != 0x32)
 					throw error;
 			}
 		}
 
-		await expect(bfb.getEepBlockInfo(blockId, 'eefull')).rejects.toMatchObject({ status: 0x32 });
+		await expect(bfb.getEepBlockInfo(blockId)).rejects.toMatchObject({ status: 0x32 });
 	}, 60000);
 
 	test('creates, replaces and deletes a free EELITE block', async () => {
@@ -307,7 +341,7 @@ describeHardware('BFB hardware', () => {
 		let blockId: number | undefined;
 		for (let candidate = maxBlockId; candidate > 0; candidate--) {
 			try {
-				await bfb.getEepBlockInfo(candidate, 'eelite');
+				await bfb.getEepBlockInfo(candidate);
 			} catch (error) {
 				if (!(error instanceof BfbRemoteError) || error.status != 0x32)
 					throw error;
@@ -322,27 +356,27 @@ describeHardware('BFB hardware', () => {
 		const initial = Buffer.from('BFB EELITE CREATE TEST', 'ascii');
 		const replacement = Buffer.from('BFB EELITE REPLACE TEST', 'ascii');
 		try {
-			await expect(bfb.getEepBlockInfo(blockId, 'eelite')).rejects.toMatchObject({ status: 0x32 });
-			await bfb.writeEepBlock(blockId, initial, 1, 'eelite');
-			expect(await bfb.readEepBlock(blockId, 0, initial.length, 'eelite')).toEqual(initial);
+			await expect(bfb.getEepBlockInfo(blockId)).rejects.toMatchObject({ status: 0x32 });
+			await bfb.writeEepBlock(blockId, initial, 1);
+			expect(await bfb.readEepBlock(blockId, 0, initial.length)).toEqual(initial);
 
-			await bfb.writeEepBlock(blockId, replacement, 2, 'eelite');
-			expect(await bfb.getEepBlockInfo(blockId, 'eelite')).toEqual({
+			await bfb.writeEepBlock(blockId, replacement, 2);
+			expect(await bfb.getEepBlockInfo(blockId)).toEqual({
+				id: blockId,
 				size: replacement.length,
 				version: 2,
-				storage: 'eelite',
 			});
-			expect(await bfb.readEepBlock(blockId, 0, replacement.length, 'eelite')).toEqual(replacement);
+			expect(await bfb.readEepBlock(blockId, 0, replacement.length)).toEqual(replacement);
 		} finally {
 			try {
-				await bfb.deleteEepBlock(blockId, 'eelite');
+				await bfb.deleteEepBlock(blockId);
 			} catch (error) {
 				if (!(error instanceof BfbRemoteError) || error.status != 0x32)
 					throw error;
 			}
 		}
 
-		await expect(bfb.getEepBlockInfo(blockId, 'eelite')).rejects.toMatchObject({ status: 0x32 });
+		await expect(bfb.getEepBlockInfo(blockId)).rejects.toMatchObject({ status: 0x32 });
 	}, 60000);
 
 	test('allocates and frees temporary GBS memory', async () => {
@@ -435,7 +469,7 @@ describeHardware('BFB hardware', () => {
 			if (pressed)
 				await bfb.pressKey(0xB5);
 			if (redirected)
-				await bfb.redirectKeypad();
+				await bfb.restoreKeypad();
 		}
 		expect(await bfb.ping()).toBe(true);
 	});
@@ -448,7 +482,7 @@ describeHardware('BFB hardware', () => {
 			await bfb.updateDisplay(0, 0, 101, 80);
 		} finally {
 			if (redirected)
-				await bfb.redirectDisplay();
+				await bfb.restoreDisplay();
 		}
 		expect(await bfb.ping()).toBe(true);
 	});
@@ -472,13 +506,13 @@ describeHardware('BFB hardware', () => {
 				await bfb.updateDisplay(0, 0, 101, 80);
 			}
 			if (redirected)
-				await bfb.redirectDisplay();
+				await bfb.restoreDisplay();
 		}
 		expect(await bfb.ping()).toBe(true);
 	}, 30000);
 
 	test('sets and restores display contrast', async () => {
-		const original = (await bfb.readEepBlock(DISPLAY_CONTRAST_BLOCK_ID, 0, 2, 'eefull'))[0];
+		const original = (await bfb.readEepBlock(DISPLAY_CONTRAST_BLOCK_ID, 0, 2))[0];
 		const changed = original == 7 ? 6 : 7;
 		try {
 			await bfb.setDisplayContrast(changed);
@@ -650,7 +684,7 @@ describeHardware('BFB hardware', () => {
 				await bfb.updateDisplay(0, 0, 1, 1);
 			}
 			if (redirected)
-				await bfb.redirectDisplay();
+				await bfb.restoreDisplay();
 		}
 		expect(await bfb.ping()).toBe(true);
 	});
@@ -722,17 +756,6 @@ describeHardware('BFB hardware', () => {
 
 	testDestructiveAction('ramp-bid')('writes a caller-provided ramp BID', async () => {
 		await bfb.setRampBid(readRequiredNumberEnv('BFB_RAMP_BID'));
-		await bfb.setU35RampBidTable(
-			readRequiredNumberEnv('BFB_U35_RAMP_MODE'),
-			readRequiredNumberEnv('BFB_U35_RAMP_START'),
-			readRequiredNumberEnv('BFB_U35_RAMP_COUNT'),
-			readRequiredNumberEnv('BFB_U35_RAMP_BID'),
-			readRequiredNumberEnv('BFB_U35_RAMP_ADDRESS'),
-		);
-		await bfb.setU35RampBidValue(
-			readRequiredNumberEnv('BFB_U35_RAMP_INDEX'),
-			readRequiredNumberEnv('BFB_U35_RAMP_BID'),
-		);
 		expect(await bfb.ping()).toBe(true);
 	});
 
@@ -747,22 +770,17 @@ describeHardware('BFB hardware', () => {
 		const value = process.env.BFB_SECURITY_STRING;
 		if (value === undefined)
 			throw new Error('BFB_SECURITY_STRING is required.');
-		expect(await bfb.sendSecurityString(value)).toBeInstanceOf(Buffer);
+		expect((await bfb.sendSecurityString(value)).response).toBeInstanceOf(Buffer);
 	});
 
 	testDestructiveAction('security-delay')('collects security completion and delay frames', async () => {
 		const value = process.env.BFB_SECURITY_DELAY_STRING;
 		if (value === undefined)
 			throw new Error('BFB_SECURITY_DELAY_STRING is required.');
-		const result = await bfb.sendSecurityStringWithDelayValue(value);
+		const result = await bfb.sendSecurityString(value);
 		expect(result.response).toBeInstanceOf(Buffer);
 		expect(result.delay).toBeGreaterThanOrEqual(0);
 		expect(result.delay).toBeLessThanOrEqual(0xFF);
-	});
-
-	testDestructiveAction('security-key')('sends a caller-provided security key', async () => {
-		await bfb.sendSecurityKey(readRequiredNumberEnv('BFB_SECURITY_KEY'));
-		expect(await bfb.ping()).toBe(true);
 	});
 
 	testDestructiveAction('freeze-security')('freezes security data for a caller-provided IMEI', async () => {
@@ -782,7 +800,7 @@ describeHardware('BFB hardware', () => {
 		let info;
 		for (let candidate = 5000; candidate <= maxBlockId; candidate++) {
 			try {
-				info = await bfb.getEepBlockInfo(candidate, 'eefull');
+				info = await bfb.getEepBlockInfo(candidate);
 				blockId = candidate;
 				break;
 			} catch (error) {
@@ -794,10 +812,10 @@ describeHardware('BFB hardware', () => {
 		expect(info).toBeDefined();
 		if (blockId === undefined || info === undefined)
 			throw new Error('No existing EEFULL block available for garbage-collection verification.');
-		const data = await bfb.readEepBlock(blockId, 0, info.size, 'eefull');
+		const data = await bfb.readEepBlock(blockId, 0, info.size);
 		await bfb.garbageCollectEefull();
-		expect(await bfb.getEepBlockInfo(blockId, 'eefull')).toEqual(info);
-		expect(await bfb.readEepBlock(blockId, 0, info.size, 'eefull')).toEqual(data);
+		expect(await bfb.getEepBlockInfo(blockId)).toEqual(info);
+		expect(await bfb.readEepBlock(blockId, 0, info.size)).toEqual(data);
 		expect(await bfb.ping()).toBe(true);
 	}, 60000);
 

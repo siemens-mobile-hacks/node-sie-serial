@@ -3,6 +3,7 @@ import { AtChannel } from './AtChannel.js';
 import { sprintf } from 'sprintf-js';
 import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from './io.js';
 import { BaseSerialProtocol } from './BaseSerialProtocol.js';
+import type { BfcDisplayBufferType } from './BFC.js';
 import { decodeCString, delay, usePromiseWithResolvers } from './utils.js';
 
 const debug = createDebug('bfb');
@@ -16,6 +17,12 @@ const BFB_EEP_READ_CHUNK = 30;
 const BFB_EEP_WRITE_CHUNK = 20;
 const BFB_EEP_MAX_WRITE_CHUNK = BFB_MAX_PAYLOAD_SIZE - 6;
 const BFB_PING_ATTEMPTS = 10;
+
+const C166_ADDRESS_SPACE_SIZE = 0x01000000;
+const C166_ADDRSEL1_ADDRESS = 0xFE18;
+const C166_BUSCON1_ADDRESS = 0xFF14;
+const C166_BUS_WINDOW_COUNT = 4;
+const C166_BUSACT = 1 << 10;
 
 export enum BfbChannel {
 	CONFIGURATION	= 0x01,
@@ -93,14 +100,19 @@ export enum BfbHardwareOpcode {
 	SET_TIMING_SCENARIO = 0x42,
 	SET_KEY_VALUE_RAMP = 0x43,
 	CONTROL_LIGHT = 0x46,
+	DISPLAY_DRIVER_DIAGNOSTIC = 0x47,
 	GET_IQ_VALUES = 0x4A,
 	SET_VIBRA = 0x4B,
 	GET_POWER_ASIC_PROJECT = 0x4F,
+	NO_OP = 0x50,
 	SET_POWER_MANAGEMENT = 0x51,
 	CLICK_SCHALKE_KEY = 0x52,
 	GET_DSP_FIRMWARE_VERSION = 0x53,
+	RF_MEASUREMENT = 0x54,
 	TEST_LUMBERG = 0x55,
 	AUDIO_DIAGNOSTICS = 0x56,
+	UPDATE_UI_STATE = 0x60,
+	SET_RESOURCE_VALUE = 0x61,
 	SET_CPU_SPEED = 0x62,
 	RESET_GPRS_BLER_COUNTERS = 0x70,
 	GET_GPRS_BLER_COUNTERS = 0x71,
@@ -118,7 +130,6 @@ export enum BfbInfoOpcode {
 	POWER_OFF = 0x04,
 	GET_FLAG_STATUS = 0x05,
 	GET_MODEL_INFORMATION = 0x07,
-	GET_SOFTWARE_VERSION = 0x08,
 	GET_LANGUAGE_INFORMATION = 0x09,
 	GET_IMEI = 0x0A,
 	INFORMATION_ELEMENT = 0x0B,
@@ -165,7 +176,7 @@ export enum BfbSecurityMode {
 	CUSTOMER	= 3,
 }
 
-export type BfbEepStorage = 'auto' | 'eelite' | 'eefull';
+export type BfbEepStorage = 'eelite' | 'eefull';
 
 type BfbFrame = {
 	channel: number;
@@ -178,6 +189,12 @@ type BfbFrameReceiver = {
 	resolve: (frame: BfbFrame) => void;
 	reject: (error: Error) => void;
 	timeoutId: NodeJS.Timeout;
+};
+
+type BfbFrameHandler = {
+	channel: number;
+	opcode: number;
+	handle: (frame: BfbFrame) => void;
 };
 
 type BfbEepExecOptions = {
@@ -196,15 +213,21 @@ export type BfbApiExecOptions = {
 };
 
 export type BfbEepBlockInfo = {
+	id: number;
 	size: number;
 	version: number;
-	storage: Exclude<BfbEepStorage, 'auto'>;
 };
 
 export type BfbEepSpaceInfo = {
 	freeBlocks: number;
 	freeAddressSpace: number;
 	freeDataSpace: number;
+};
+
+export type BfbMemoryRegion = {
+	addr: number;
+	size: number;
+	name: string;
 };
 
 export type BfbGprsBlerCounters = {
@@ -239,6 +262,39 @@ export enum BfbDisplayPattern {
 	VALUE_GRID		= 0x64,
 }
 
+export enum BfbDisplayDiagnosticSelector {
+	GET_BYTES_PER_PIXEL			= 0x02,
+	ADJUST_CONTRAST				= 0x03,
+	COMMIT_CALIBRATION			= 0x04,
+	PULSE_CONTROL_PIN			= 0x05,
+	GET_CALIBRATION_STATE		= 0x06,
+	STEP_CALIBRATION_FORWARD	= 0x07,
+	STEP_CALIBRATION_BACKWARD	= 0x08,
+	GET_ZERO_STATE				= 0x09,
+	SET_BYTES_PER_PIXEL			= 0x10,
+	ENABLE_OPTION_15				= 0x15,
+	ENABLE_OPTION_17				= 0x17,
+	DISABLE_OPTION_17			= 0x18,
+	GET_CONTROLLER_MARKER		= 0x40,
+	GET_CONTROLLER_STATE_A		= 0x41,
+	GET_CONTROLLER_STATE_B		= 0x42,
+	GET_CONTROLLER_STATE_C		= 0x43,
+	DISABLE_OPTION_15			= 0x44,
+	SET_INTERNAL_FLAG			= 0x45,
+	PULSE_CONTROL_PIN_ALT		= 0x46,
+	CALL_CONTROLLER_CALLBACK	= 0x47,
+	REINITIALIZE_CONTROLLER		= 0x48,
+	RESET_TIMING_STATISTICS		= 0x79,
+}
+
+export enum BfbRfMeasurementCommand {
+	GET_CHANNEL_VALUES	= 0x00,
+	GET_CHANNEL_MAP		= 0x01,
+	SET_CHANNEL_MAP		= 0x02,
+	RUN_CHANNEL			= 0x03,
+	GET_AVERAGED_VALUES	= 0x05,
+}
+
 export type BfbDisplayState = {
 	x: number;
 	y: number;
@@ -246,7 +302,23 @@ export type BfbDisplayState = {
 	height: number;
 	bufferAddress: number;
 	bytesPerPixel: number;
-	data: Buffer;
+};
+
+export type BfbDisplaySize = {
+	width: number;
+	height: number;
+};
+
+export type BfbDisplayBufferType = Extract<BfcDisplayBufferType, 'rgb332' | 'argb4444'> | 'wb';
+
+export type BfbDisplayBufferData = IoReadResult & {
+	type: BfbDisplayBufferType;
+	bpp: number;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	bufferAddress: number;
 };
 
 export type BfbSensorData = {
@@ -259,21 +331,14 @@ export type BfbSensorAddresses = {
 	calibrated: number;
 };
 
-export type BfbWordPair = [number, number];
-
 export type BfbInformationElementList = {
 	count: number;
 	elements: number[];
 };
 
-export type BfbSoftwareVersion = {
-	date: string;
-	time: string;
-};
-
 export type BfbSecurityStringResponse = {
 	response: Buffer;
-	delay: number;
+	delay?: number;
 };
 
 enum BfbTransportMode {
@@ -299,6 +364,8 @@ const BFB_RESPONSE_LENGTHS: Partial<Record<number, Record<number, number>>> = {
 		[BfbHardwareOpcode.GET_HARDWARE_INFO]: 3,
 		[BfbHardwareOpcode.GET_AUDIO_GAIN_SHADOW]: 3,
 		[BfbHardwareOpcode.GET_NORMAL_MODE_RX_LEVEL]: 3,
+		[BfbHardwareOpcode.NO_OP]: 1,
+		[BfbHardwareOpcode.SET_RESOURCE_VALUE]: 1,
 		[BfbHardwareOpcode.GET_GPRS_BLER_COUNTERS]: 5,
 	},
 	[BfbChannel.GBS]: {
@@ -334,7 +401,12 @@ export class BfbUnsupportedCommandError extends Error {
 
 	constructor(channel: number, opcode: number) {
 		const command = getBfbOpcodeName(channel, opcode) ?? 'command';
-		super(sprintf('BFB %s is unsupported in the current phone mode (%02X/%02X returned no data).', command, channel, opcode));
+		super(sprintf(
+			'BFB %s is unsupported in the current phone mode (%02X/%02X returned no data).',
+			command,
+			channel,
+			opcode,
+		));
 		this.name = 'BfbUnsupportedCommandError';
 		this.channel = channel;
 		this.opcode = opcode;
@@ -359,9 +431,7 @@ export class BFB extends BaseSerialProtocol {
 	private frames: BfbFrame[] = [];
 	private frameQueueChannel?: number;
 	private frameReceiver?: BfbFrameReceiver;
-	private keypadCallback?: (data: Buffer) => void;
-	private displayCallback?: (event: BfbDisplayEvent) => void;
-	private displayRedirectMode?: BfbDisplayRedirectMode;
+	private readonly frameHandlers = new Map<string, BfbFrameHandler>();
 	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
 	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
 	private readonly atc = new AtChannel(this.port);
@@ -380,9 +450,7 @@ export class BFB extends BaseSerialProtocol {
 				this.buffer = Buffer.alloc(0);
 				this.frames = [];
 				this.frameQueueChannel = undefined;
-				this.keypadCallback = undefined;
-				this.displayCallback = undefined;
-				this.displayRedirectMode = undefined;
+				this.frameHandlers.clear();
 			break;
 
 			case BfbTransportMode.AT:
@@ -518,42 +586,33 @@ export class BFB extends BaseSerialProtocol {
 			this.frames.push(frame);
 			return;
 		}
-		if (frame.channel == BfbChannel.HARDWARE && frame.data[0] == BfbHardwareOpcode.KEYPAD_EVENT) {
-			if (this.keypadCallback)
-				this.keypadCallback(Buffer.from(frame.data.subarray(1)));
-			else
-				debug(`Ignored BFB keypad event: ${frame.data.toString('hex')}`);
-			return;
-		}
-		if (frame.channel == BfbChannel.HARDWARE && frame.data[0] == BfbHardwareOpcode.DISPLAY_EVENT) {
-			if (this.displayCallback && (frame.data.length == 5 || frame.data.length == 11)) {
-				const left = frame.data[1];
-				const top = frame.data[2];
-				let right = frame.data[3];
-				let bottom = frame.data[4];
-				if (this.displayRedirectMode == BfbDisplayRedirectMode.RAW_RECT || this.displayRedirectMode == BfbDisplayRedirectMode.RAW_RECT_WITH_ADDRESS) {
-					right = left + right - 1;
-					bottom = top + bottom - 1;
-				}
-				const event: BfbDisplayEvent = { left, top, right, bottom };
-				if (frame.data.length == 11) {
-					event.bufferAddress = frame.data.readUInt32LE(5);
-					event.bytesPerPixel = frame.data.readUInt16LE(9);
-				}
-				this.displayCallback(event);
-			} else {
-				debug(`Ignored BFB display event: ${frame.data.toString('hex')}`);
+		for (const handler of this.frameHandlers.values()) {
+			if (this.frameMatches(frame, handler.channel, handler.opcode)) {
+				handler.handle(frame);
+				return;
 			}
-			return;
 		}
 		debug(sprintf('Ignored BFB frame CH=%02X %s', frame.channel, frame.data.toString('hex')));
+	}
+
+	private registerFrameHandler(id: string, handler: BfbFrameHandler): void {
+		this.frameHandlers.set(id, handler);
+	}
+
+	private unregisterFrameHandler(id: string): void {
+		this.frameHandlers.delete(id);
 	}
 
 	private frameMatches(frame: BfbFrame, channel: number, opcode: number): boolean {
 		return (channel == 0 || frame.channel == channel) && (opcode == 0 || frame.data[0] == opcode);
 	}
 
-	private async receiveBfbFrame(channel: number, opcode: number, deadline: number, send?: () => Promise<void>): Promise<BfbFrame> {
+	private async receiveBfbFrame(
+		channel: number,
+		opcode: number,
+		deadline: number,
+		send?: () => Promise<void>,
+	): Promise<BfbFrame> {
 		const index = this.frames.findIndex((frame) => this.frameMatches(frame, channel, opcode));
 		if (index >= 0)
 			return this.frames.splice(index, 1)[0];
@@ -601,11 +660,7 @@ export class BFB extends BaseSerialProtocol {
 		}
 	}
 
-	async exec(
-		channel: number,
-		payload: Buffer | number[],
-		options: BfbApiExecOptions = {},
-	): Promise<Buffer> {
+	async exec(channel: number, payload: Buffer | number[], options: BfbApiExecOptions = {}): Promise<Buffer> {
 		if (this.mode != BfbTransportMode.BFB)
 			throw new Error('BFB is not connected.');
 
@@ -628,8 +683,11 @@ export class BFB extends BaseSerialProtocol {
 			throw new BfbUnsupportedCommandError(channel, data[0]);
 		if (expectedLength !== undefined && frame.data.length != expectedLength)
 			throw new Error(`Invalid BFB response length: ${frame.data.length}, expected ${expectedLength}.`);
-		if (validOptions.minResponseLength !== undefined && frame.data.length < validOptions.minResponseLength)
-			throw new Error(`Invalid BFB response length: ${frame.data.length}, expected at least ${validOptions.minResponseLength}.`);
+		if (validOptions.minResponseLength !== undefined && frame.data.length < validOptions.minResponseLength) {
+			throw new Error(
+				`Invalid BFB response length: ${frame.data.length}, expected at least ${validOptions.minResponseLength}.`,
+			);
+		}
 		return frame.data;
 	}
 
@@ -754,7 +812,11 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async configurePowerSaving(mode: number): Promise<void> {
-		const response = await this.exec(BfbChannel.CONFIGURATION, [BfbConfigurationOpcode.POWER_SAVING, mode], { expectedOpcode: 0 });
+		const response = await this.exec(
+			BfbChannel.CONFIGURATION,
+			[BfbConfigurationOpcode.POWER_SAVING, mode],
+			{ expectedOpcode: 0 },
+		);
 		if (response[0] == BfbConfigurationOpcode.POWER_SAVING_REJECTED)
 			throw new BfbRemoteError(response[0], 'BFB power-saving configuration was rejected.');
 		if (response.length != 2)
@@ -764,6 +826,41 @@ export class BFB extends BaseSerialProtocol {
 				`Invalid BFB power-saving response: ${response.toString('hex')}, expected 12${mode.toString(16).padStart(2, '0')}.`,
 			);
 		}
+	}
+
+	async getMemoryRegions(): Promise<BfbMemoryRegion[]> {
+		const addrsel = (await this.readMemory(C166_ADDRSEL1_ADDRESS, C166_BUS_WINDOW_COUNT * 2)).buffer;
+		const buscon = (await this.readMemory(C166_BUSCON1_ADDRESS, C166_BUS_WINDOW_COUNT * 2)).buffer;
+		const windows: BfbMemoryRegion[] = [];
+
+		for (let index = 0; index < C166_BUS_WINDOW_COUNT; index++) {
+			const value = addrsel.readUInt16LE(index * 2);
+			if ((buscon.readUInt16LE(index * 2) & C166_BUSACT) == 0)
+				continue;
+
+			const sizeCode = value & 0xF;
+			const size = 0x1000 << sizeCode;
+			const addr = (((value & 0xFFF0) << 8) & ~(size - 1)) >>> 0;
+			windows.push({ name: 'RAM', addr, size });
+		}
+
+		windows.sort((a, b) => a.addr - b.addr);
+
+		const memoryRegions: BfbMemoryRegion[] = [];
+		let address = 0;
+		for (const region of windows) {
+			if (address < region.addr)
+				memoryRegions.push({ name: 'FLASH', addr: address, size: region.addr - address });
+			if (address < region.addr + region.size) {
+				const addr = Math.max(address, region.addr);
+				memoryRegions.push({ name: 'RAM', addr, size: region.addr + region.size - addr });
+				address = region.addr + region.size;
+			}
+		}
+		if (address < C166_ADDRESS_SPACE_SIZE) {
+			memoryRegions.push({ name: 'FLASH', addr: address, size: C166_ADDRESS_SPACE_SIZE - address });
+		}
+		return memoryRegions;
 	}
 
 	async readMemory(address: number, length: number, options: IoReadWriteOptions = {}): Promise<IoReadResult> {
@@ -809,7 +906,7 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt32LE(address, 1);
 		request.writeUInt16LE(buffer.length, 5);
 		buffer.copy(request, 7);
-		await this.execAck(BfbChannel.CORE, request);
+		await this.exec(BfbChannel.CORE, request);
 	}
 
 	async writeMemoryByte(address: number, value: number): Promise<void> {
@@ -817,7 +914,7 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(BfbCoreOpcode.WRITE_MEMORY_BYTE, 0);
 		request.writeUInt32LE(address, 1);
 		request.writeUInt8(value, 5);
-		await this.execAck(BfbChannel.CORE, request);
+		await this.exec(BfbChannel.CORE, request);
 	}
 
 	async writeMemoryWord(address: number, value: number): Promise<void> {
@@ -825,7 +922,7 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(BfbCoreOpcode.WRITE_MEMORY_WORD, 0);
 		request.writeUInt32LE(address, 1);
 		request.writeUInt16LE(value, 5);
-		await this.execAck(BfbChannel.CORE, request);
+		await this.exec(BfbChannel.CORE, request);
 	}
 
 	async execCode(code: Buffer): Promise<Buffer> {
@@ -849,7 +946,8 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getDisplayType(): Promise<number> {
-		return this.readUInt8Command(BfbChannel.HARDWARE, BfbHardwareOpcode.GET_DISPLAY_TYPE);
+		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.GET_DISPLAY_TYPE], { responseLength: 2 });
+		return response[1];
 	}
 
 	async getDisplayBufferAddress(): Promise<number> {
@@ -866,7 +964,67 @@ export class BFB extends BaseSerialProtocol {
 			height: response[4],
 			bufferAddress: response.readUInt32LE(5),
 			bytesPerPixel: response.readUInt16LE(9),
-			data: Buffer.from(response.subarray(1)),
+		};
+	}
+
+	async getDisplaySize(timeout = 5000): Promise<BfbDisplaySize> {
+		const { promise, resolve, reject } = usePromiseWithResolvers<BfbDisplaySize>();
+		const timeoutId = setTimeout(() => reject(new Error('Timed out waiting for BFB display size.')), timeout);
+		let redirected = false;
+		try {
+			await this.updateDisplay(0, 0, 0xFFFF, 0xFFFF);
+			await this.redirectDisplay((event) => resolve({
+				width: event.right - event.left + 1,
+				height: event.bottom - event.top + 1,
+			}));
+			redirected = true;
+			return await promise;
+		} finally {
+			clearTimeout(timeoutId);
+			if (redirected)
+				await this.restoreDisplay();
+		}
+	}
+
+	async getDisplayBuffer(options: IoReadWriteOptions = {}): Promise<BfbDisplayBufferData> {
+		const size = await this.getDisplaySize();
+		const width = size.width;
+		const height = size.height;
+		let bufferAddress: number;
+		let bpp: number;
+		let type: BfbDisplayBufferType;
+
+		try {
+			const state = await this.getDisplayState();
+			bufferAddress = state.bufferAddress;
+			bpp = state.bytesPerPixel;
+			if (bpp == 2) {
+				type = 'argb4444';
+			} else if (bpp == 1 && await this.getPhoneModel() == 'S55') {
+				type = 'rgb332';
+			} else {
+				type = 'wb';
+			}
+		} catch (error) {
+			if (!(error instanceof BfbUnsupportedCommandError))
+				throw error;
+			bufferAddress = await this.getDisplayBufferAddress();
+			bpp = 1;
+			type = await this.getPhoneModel() == 'S55' ? 'rgb332' : 'wb';
+		}
+
+		const bufferSize = type == 'wb' ? Math.floor((width + 7) / 8) * height : width * height * bpp;
+		const result = await this.readMemory(bufferAddress, bufferSize, options);
+
+		return {
+			type,
+			bpp,
+			x: 0,
+			y: 0,
+			width,
+			height,
+			bufferAddress,
+			...result,
 		};
 	}
 
@@ -879,7 +1037,11 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getHardwareData(selector: number): Promise<Buffer> {
-		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.GET_HARDWARE_DATA, selector], { minResponseLength: 2 });
+		const response = await this.exec(
+			BfbChannel.HARDWARE,
+			[BfbHardwareOpcode.GET_HARDWARE_DATA, selector],
+			{ minResponseLength: 2 },
+		);
 		if (response.length >= BFB_MAX_PAYLOAD_SIZE)
 			throw new Error(`Invalid BFB hardware data response length: ${response.length}.`);
 		if (response[1] != selector)
@@ -898,12 +1060,20 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getFirmwareInformation(): Promise<Buffer> {
-		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.GET_FIRMWARE_INFORMATION], { minResponseLength: 5 });
+		const response = await this.exec(
+			BfbChannel.HARDWARE,
+			[BfbHardwareOpcode.GET_FIRMWARE_INFORMATION],
+			{ minResponseLength: 5 },
+		);
 		return Buffer.from(response.subarray(1));
 	}
 
-	async getIqMeanValues(count: number): Promise<BfbWordPair> {
-		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.GET_IQ_VALUES, 0, count], { responseLength: 5 });
+	async getIqMeanValues(count: number): Promise<[number, number]> {
+		const response = await this.exec(
+			BfbChannel.HARDWARE,
+			[BfbHardwareOpcode.GET_IQ_VALUES, 0, count],
+			{ responseLength: 5 },
+		);
 		return [response.readUInt16LE(1), response.readUInt16LE(3)];
 	}
 
@@ -946,15 +1116,26 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getMobileMode(): Promise<number> {
-		return this.readUInt16Command(BfbChannel.HARDWARE, BfbHardwareOpcode.GET_MOBILE_MODE);
+		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.GET_MOBILE_MODE], { responseLength: 3 });
+		return response.readUInt16LE(1);
 	}
 
 	async getDspFirmwareVersion(): Promise<number> {
-		return this.readUInt16Command(BfbChannel.HARDWARE, BfbHardwareOpcode.GET_DSP_FIRMWARE_VERSION);
+		const response = await this.exec(
+			BfbChannel.HARDWARE,
+			[BfbHardwareOpcode.GET_DSP_FIRMWARE_VERSION],
+			{ responseLength: 3 },
+		);
+		return response.readUInt16LE(1);
 	}
 
 	async getPowerAsicProject(): Promise<number> {
-		return this.readUInt8Command(BfbChannel.HARDWARE, BfbHardwareOpcode.GET_POWER_ASIC_PROJECT);
+		const response = await this.exec(
+			BfbChannel.HARDWARE,
+			[BfbHardwareOpcode.GET_POWER_ASIC_PROJECT],
+			{ responseLength: 2 },
+		);
+		return response[1];
 	}
 
 	async getHardwareInfo(selector: number): Promise<number> {
@@ -965,7 +1146,8 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getPhoneModel(): Promise<string> {
-		return this.readStringCommand(BfbChannel.INFO, BfbInfoOpcode.GET_MODEL_INFORMATION);
+		const response = await this.exec(BfbChannel.INFO, [BfbInfoOpcode.GET_MODEL_INFORMATION], { minResponseLength: 2 });
+		return decodeCString(response.subarray(1));
 	}
 
 	async getFirmwareVersion(): Promise<number> {
@@ -974,7 +1156,8 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getLanguageGroup(): Promise<string> {
-		return this.readStringCommand(BfbChannel.INFO, BfbInfoOpcode.GET_LANGUAGE_INFORMATION);
+		const response = await this.exec(BfbChannel.INFO, [BfbInfoOpcode.GET_LANGUAGE_INFORMATION], { minResponseLength: 2 });
+		return decodeCString(response.subarray(1));
 	}
 
 	async getIMEI(): Promise<string> {
@@ -983,7 +1166,8 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getFlagStatus(): Promise<number> {
-		return this.readUInt8Command(BfbChannel.INFO, BfbInfoOpcode.GET_FLAG_STATUS);
+		const response = await this.exec(BfbChannel.INFO, [BfbInfoOpcode.GET_FLAG_STATUS], { responseLength: 2 });
+		return response[1];
 	}
 
 	async getSecurityMode(): Promise<BfbSecurityMode> {
@@ -1006,19 +1190,16 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async getBatteryVoltage(): Promise<number> {
-		return this.readUInt16Command(BfbChannel.INFO, BfbInfoOpcode.GET_BATTERY_VOLTAGE);
-	}
-
-	async getB35SoftwareVersion(): Promise<BfbSoftwareVersion> {
-		const response = await this.exec(BfbChannel.INFO, [BfbInfoOpcode.GET_SOFTWARE_VERSION], { minResponseLength: 17 });
-		return {
-			date: decodeCString(response.subarray(1, 9)),
-			time: decodeCString(response.subarray(9, 17)),
-		};
+		const response = await this.exec(BfbChannel.INFO, [BfbInfoOpcode.GET_BATTERY_VOLTAGE], { responseLength: 3 });
+		return response.readUInt16LE(1);
 	}
 
 	async getInformationElementList(id: number): Promise<BfbInformationElementList> {
-		const response = await this.exec(BfbChannel.INFO, createInformationElementRequest(0x0F, id), { minResponseLength: 2 });
+		const response = await this.exec(
+			BfbChannel.INFO,
+			createInformationElementRequest(0x0F, id),
+			{ minResponseLength: 2 },
+		);
 		const count = response[1];
 		if (response.length != 2 + count * 2) {
 			throw new Error(
@@ -1027,10 +1208,7 @@ export class BFB extends BaseSerialProtocol {
 		}
 		return {
 			count,
-			elements: Array.from(
-				{ length: count },
-				(_value, index) => response.readUInt16LE(2 + index * 2),
-			),
+			elements: Array.from({ length: count }, (_value, index) => response.readUInt16LE(2 + index * 2)),
 		};
 	}
 
@@ -1072,39 +1250,20 @@ export class BFB extends BaseSerialProtocol {
 		});
 	}
 
-	async sendSecurityString(value: string, timeout = 5000): Promise<Buffer> {
-		const payload = encodeSecurityString(value);
-		return this.exec(BfbChannel.SECURITY, payload, { expectedOpcode: 0, timeout });
-	}
-
-	async sendSecurityStringWithDelayValue(value: string, timeout = 5000): Promise<BfbSecurityStringResponse> {
+	async sendSecurityString(value: string, timeout = 5000): Promise<BfbSecurityStringResponse> {
 		const payload = encodeSecurityString(value);
 		return this.withFrameQueue(BfbChannel.SECURITY, async () => {
 			await this.sendFrame(BfbChannel.SECURITY, payload);
 			const deadline = Date.now() + timeout;
-			const first = await this.receiveBfbFrame(BfbChannel.SECURITY, 0, deadline);
-			const second = await this.receiveBfbFrame(BfbChannel.SECURITY, 0, deadline);
-			if (first.data.length == 2 && first.data[0] == 0x57) {
-				return {
-					response: Buffer.from(second.data),
-					delay: first.data[1],
-				};
-			}
-			if (second.data.length == 2 && second.data[0] == 0x57) {
-				return {
-					response: Buffer.from(first.data),
-					delay: second.data[1],
-				};
-			}
-			throw new Error('BFB security delay response is missing.');
+			const frame = await this.receiveBfbFrame(BfbChannel.SECURITY, 0, deadline);
+			if (frame.data.length != 2 || frame.data[0] != 0x57)
+				return { response: Buffer.from(frame.data) };
+			const response = await this.receiveBfbFrame(BfbChannel.SECURITY, 0, deadline);
+			return {
+				response: Buffer.from(response.data),
+				delay: frame.data[1],
+			};
 		});
-	}
-
-	async sendSecurityKey(key: number): Promise<void> {
-		const value = `X${key.toString().padStart(8, '0')}`;
-		if (value.length != 9)
-			throw new Error('Security key must fit into eight decimal digits.');
-		await this.sendSecurityString(value);
 	}
 
 	async freezeSecurityData(imei: string): Promise<number> {
@@ -1118,11 +1277,11 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async simulateChipCard(): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SIMULATE_CHIP_CARD]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SIMULATE_CHIP_CARD]);
 	}
 
 	async pressKey(keyCode: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.PRESS_KEY, keyCode]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.PRESS_KEY, keyCode]);
 	}
 
 	async updateDisplay(x: number, y: number, width: number, height: number): Promise<void> {
@@ -1132,45 +1291,75 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt16LE(y, 3);
 		request.writeUInt16LE(width, 5);
 		request.writeUInt16LE(height, 7);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
-	async redirectKeypad(callback?: (data: Buffer) => void): Promise<void> {
-		const previousCallback = this.keypadCallback;
-		this.keypadCallback = callback;
+	async redirectKeypad(callback: (data: Buffer) => void): Promise<void> {
+		this.registerFrameHandler('keypad', {
+			channel: BfbChannel.HARDWARE,
+			opcode: BfbHardwareOpcode.KEYPAD_EVENT,
+			handle: (frame) => {
+				callback(Buffer.from(frame.data.subarray(1)));
+			},
+		});
 		try {
-			await this.execAck(BfbChannel.HARDWARE, [callback ? BfbHardwareOpcode.REDIRECT_KEYPAD : BfbHardwareOpcode.RESTORE_KEYPAD]);
+			await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.REDIRECT_KEYPAD]);
 		} catch (error) {
-			if (this.mode == BfbTransportMode.BFB)
-				this.keypadCallback = previousCallback;
+			this.unregisterFrameHandler('keypad');
 			throw error;
 		}
 	}
 
-	async redirectDisplay(callback?: (event: BfbDisplayEvent) => void, mode?: BfbDisplayRedirectMode): Promise<void> {
-		const previousCallback = this.displayCallback;
-		const previousMode = this.displayRedirectMode;
-		const enabled = callback !== undefined || mode !== undefined;
-		this.displayCallback = callback;
-		this.displayRedirectMode = enabled ? mode ?? BfbDisplayRedirectMode.RECT : undefined;
+	async restoreKeypad(): Promise<void> {
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.RESTORE_KEYPAD]);
+		this.unregisterFrameHandler('keypad');
+	}
+
+	async redirectDisplay(callback: (event: BfbDisplayEvent) => void, mode?: BfbDisplayRedirectMode): Promise<void> {
+		const redirectMode = mode ?? BfbDisplayRedirectMode.RECT;
+		this.registerFrameHandler('display', {
+			channel: BfbChannel.HARDWARE,
+			opcode: BfbHardwareOpcode.DISPLAY_EVENT,
+			handle: (frame) => {
+				if (frame.data.length != 5 && frame.data.length != 11) {
+					debug(`Ignored invalid BFB display event: ${frame.data.toString('hex')}`);
+					return;
+				}
+
+				const left = frame.data[1];
+				const top = frame.data[2];
+				let right = frame.data[3];
+				let bottom = frame.data[4];
+				const rawRect = redirectMode == BfbDisplayRedirectMode.RAW_RECT ||
+					redirectMode == BfbDisplayRedirectMode.RAW_RECT_WITH_ADDRESS;
+				if (rawRect) {
+					right = left + right - 1;
+					bottom = top + bottom - 1;
+				}
+				const event: BfbDisplayEvent = { left, top, right, bottom };
+				if (frame.data.length == 11) {
+					event.bufferAddress = frame.data.readUInt32LE(5);
+					event.bytesPerPixel = frame.data.readUInt16LE(9);
+				}
+				callback(event);
+			},
+		});
 		try {
-			let request: number[];
-			if (!enabled) {
-				request = [BfbHardwareOpcode.RESTORE_DISPLAY];
-			} else if (mode === undefined) {
-				request = [BfbHardwareOpcode.REDIRECT_DISPLAY];
-			} else {
-				request = [BfbHardwareOpcode.REDIRECT_DISPLAY, mode];
-			}
-			const response = await this.exec(BfbChannel.HARDWARE, request);
-			if (response.length == 1)
-				await this.exec(BfbChannel.HARDWARE, request);
+			const request: number[] = [BfbHardwareOpcode.REDIRECT_DISPLAY];
+			if (mode !== undefined)
+				request.push(mode);
+			await this.exec(BfbChannel.HARDWARE, request);
 		} catch (error) {
-			if (this.mode == BfbTransportMode.BFB) {
-				this.displayCallback = previousCallback;
-				this.displayRedirectMode = previousMode;
-			}
+			this.unregisterFrameHandler('display');
 			throw error;
+		}
+	}
+
+	async restoreDisplay(): Promise<void> {
+		try {
+			await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.RESTORE_DISPLAY]);
+		} finally {
+			this.unregisterFrameHandler('display');
 		}
 	}
 
@@ -1180,18 +1369,18 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt16LE(frequency, 1);
 		request.writeUInt16LE(duration, 3);
 		request.writeUInt8(option, 5);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async stopTone(): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.STOP_TONE]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.STOP_TONE]);
 	}
 
 	async bootDsp(address: number): Promise<void> {
 		const request = Buffer.alloc(5);
 		request.writeUInt8(BfbHardwareOpcode.BOOT_DSP, 0);
 		request.writeUInt32LE(address, 1);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async sendDspCommand(words: number[]): Promise<Buffer> {
@@ -1220,45 +1409,23 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(BfbHardwareOpcode.SET_RAMP_BID, 0);
 		request.writeUInt32LE(value, 1);
 		request.writeUInt8(1, 5);
-		await this.execAck(BfbChannel.HARDWARE, request);
-	}
-
-	async setU35RampBidTable(mode: number, start: number, count: number, bid: number, address: number): Promise<void> {
-		const request = Buffer.alloc(11);
-		request.writeUInt8(BfbHardwareOpcode.SET_RAMP_BID, 0);
-		request.writeUInt8(mode, 1);
-		request.writeUInt8(start, 2);
-		request.writeUInt8(count, 3);
-		request.writeUInt16LE(bid, 4);
-		request.writeUInt32LE(address, 6);
-		request.writeUInt8(1, 10);
-		await this.execAck(BfbChannel.HARDWARE, request);
-	}
-
-	async setU35RampBidValue(index: number, bid: number): Promise<void> {
-		const request = Buffer.alloc(6);
-		request.writeUInt8(BfbHardwareOpcode.SET_RAMP_BID, 0);
-		request.writeUInt8(2, 1);
-		request.writeUInt8(index, 2);
-		request.writeUInt16LE(bid, 3);
-		request.writeUInt8(1, 5);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async setPowerMode(mode: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_POWER_MODE, mode, 0x01]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_POWER_MODE, mode, 0x01]);
 	}
 
 	async setTxPwm(value: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_TX_PWM, value]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_TX_PWM, value]);
 	}
 
 	async setMc45PrechargeRampValue(value: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_TX_PWM, value, 0]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_TX_PWM, value, 0]);
 	}
 
 	async setPaCompensation(value: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_PA_COMPENSATION, value]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_PA_COMPENSATION, value]);
 	}
 
 	async setNfScaling(a: number, b: number): Promise<void> {
@@ -1266,26 +1433,29 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(BfbHardwareOpcode.SET_NF_SCALING, 0);
 		request.writeUInt16LE(a, 1);
 		request.writeUInt16LE(b, 3);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async setEnvironmentTemperature(temperature: number): Promise<void> {
 		const request = Buffer.alloc(3);
 		request.writeUInt8(BfbHardwareOpcode.SET_ENVIRONMENT_TEMPERATURE, 0);
 		request.writeUInt16LE(temperature, 1);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async setNfControl(enabled: boolean): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [enabled ? BfbHardwareOpcode.ACTIVATE_NF_CONTROL : BfbHardwareOpcode.DEACTIVATE_NF_CONTROL]);
+		const opcode = enabled ?
+			BfbHardwareOpcode.ACTIVATE_NF_CONTROL :
+			BfbHardwareOpcode.DEACTIVATE_NF_CONTROL;
+		await this.exec(BfbChannel.HARDWARE, [opcode]);
 	}
 
 	async configureNfControl(a: number, b: number, c: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.CONFIGURE_NF_CONTROL, a, b, c]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.CONFIGURE_NF_CONTROL, a, b, c]);
 	}
 
 	async setDisplayContrast(contrast: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_DISPLAY_CONTRAST, contrast]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_DISPLAY_CONTRAST, contrast]);
 	}
 
 	async controlLight(channel: number, brightness: number, duration = 0): Promise<void> {
@@ -1295,7 +1465,16 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(channel, 2);
 		request.writeUInt8(brightness, 3);
 		request.writeUInt16LE(duration, 4);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
+	}
+
+	async displayDriverDiagnostic(selector: number, data: number[] = []): Promise<Buffer> {
+		const response = await this.exec(BfbChannel.HARDWARE, [
+			BfbHardwareOpcode.DISPLAY_DRIVER_DIAGNOSTIC,
+			selector,
+			...data,
+		]);
+		return Buffer.from(response.subarray(1));
 	}
 
 	async getSensorAddresses(): Promise<BfbSensorAddresses> {
@@ -1322,11 +1501,11 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async switchOffDisplay(): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SWITCH_OFF_DISPLAY]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SWITCH_OFF_DISPLAY]);
 	}
 
 	async speechOff(): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SWITCH_SPEECH_OFF]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SWITCH_SPEECH_OFF]);
 	}
 
 	async playToneOv(value: number, option: number): Promise<void> {
@@ -1334,14 +1513,14 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(BfbHardwareOpcode.PLAY_OV_TONE, 0);
 		request.writeUInt16LE(value, 1);
 		request.writeUInt8(option, 3);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async setTimingScenario(scenario: number): Promise<void> {
 		const request = Buffer.alloc(5);
 		request.writeUInt8(BfbHardwareOpcode.SET_TIMING_SCENARIO, 0);
 		request.writeUInt32LE(scenario, 1);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async setKeyValueRamp(value: number): Promise<void> {
@@ -1349,11 +1528,11 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(BfbHardwareOpcode.SET_KEY_VALUE_RAMP, 0);
 		request.writeUInt16LE(value, 1);
 		request.writeUInt8(1, 3);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	async setVibra(value: number): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_VIBRA, value]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_VIBRA, value]);
 	}
 
 	async setPowerManagement(mode: number, value: number): Promise<void> {
@@ -1361,7 +1540,24 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(BfbHardwareOpcode.SET_POWER_MANAGEMENT, 0);
 		request.writeUInt8(mode, 1);
 		request.writeUInt16LE(value, 2);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
+	}
+
+	async noOp(): Promise<void> {
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.NO_OP]);
+	}
+
+	async rfMeasurement(command: number, data: number[] = []): Promise<Buffer> {
+		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.RF_MEASUREMENT, command, ...data]);
+		return Buffer.from(response.subarray(1));
+	}
+
+	async updateUiState(value: number): Promise<void> {
+		await this.sendFrame(BfbChannel.HARDWARE, [BfbHardwareOpcode.UPDATE_UI_STATE, value]);
+	}
+
+	async setResourceValue(resourceId: number, value: number): Promise<void> {
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_RESOURCE_VALUE, resourceId, value]);
 	}
 
 	async clickSchalkeKey(group: number, key: number, option: number): Promise<void> {
@@ -1369,7 +1565,7 @@ export class BFB extends BaseSerialProtocol {
 			throw new Error('Schalke key group must be in range 0..3.');
 		if (!Number.isInteger(key) || key < 0 || key > 0x1F)
 			throw new Error('Schalke key must be in range 0..31.');
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.CLICK_SCHALKE_KEY, group << 5 | key, option]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.CLICK_SCHALKE_KEY, group << 5 | key, option]);
 	}
 
 	async testLumberg(): Promise<number> {
@@ -1378,7 +1574,11 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async setCpuSpeed(speed: number): Promise<number> {
-		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.SET_CPU_SPEED, speed], { responseLength: 2 });
+		const response = await this.exec(
+			BfbChannel.HARDWARE,
+			[BfbHardwareOpcode.SET_CPU_SPEED, speed],
+			{ responseLength: 2 },
+		);
 		return response[1];
 	}
 
@@ -1387,7 +1587,7 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async resetGprsBlerCounters(): Promise<void> {
-		await this.execAck(BfbChannel.HARDWARE, [BfbHardwareOpcode.RESET_GPRS_BLER_COUNTERS]);
+		await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.RESET_GPRS_BLER_COUNTERS]);
 	}
 
 	async activateBluetoothMapper(): Promise<void> {
@@ -1417,7 +1617,11 @@ export class BFB extends BaseSerialProtocol {
 	}
 
 	async generateDisplayPattern(pattern: number): Promise<void> {
-		const response = await this.exec(BfbChannel.HARDWARE, [BfbHardwareOpcode.GENERATE_DISPLAY_PATTERN, pattern], { responseLength: 2 });
+		const response = await this.exec(
+			BfbChannel.HARDWARE,
+			[BfbHardwareOpcode.GENERATE_DISPLAY_PATTERN, pattern],
+			{ responseLength: 2 },
+		);
 		if (response[1] != pattern)
 			throw new Error(`BFB display pattern echo mismatch: ${response[1]} != ${pattern}.`);
 	}
@@ -1434,7 +1638,7 @@ export class BFB extends BaseSerialProtocol {
 		const request = Buffer.alloc(5);
 		request.writeUInt8(BfbGbsOpcode.FREE, 0);
 		request.writeUInt32LE(address, 1);
-		await this.execAck(BfbChannel.GBS, request);
+		await this.exec(BfbChannel.GBS, request);
 	}
 
 	async powerOff(): Promise<void> {
@@ -1463,26 +1667,22 @@ export class BFB extends BaseSerialProtocol {
 		await this.sendFrame(BfbChannel.SERVICE_STREAM, terminator);
 	}
 
-	async getEepBlockInfo(blockId: number, storage: BfbEepStorage = 'auto'): Promise<BfbEepBlockInfo> {
-		const resolvedStorage = resolveEepStorage(blockId, storage);
-		const opcode = resolvedStorage == 'eefull' ? BfbEepOpcode.GET_EEFULL_BLOCK_INFO : BfbEepOpcode.GET_EELITE_BLOCK_INFO;
+	async getEepBlockInfo(blockId: number): Promise<BfbEepBlockInfo> {
+		const storage = getEepStorage(blockId);
+		const opcode = storage == 'eefull' ? BfbEepOpcode.GET_EEFULL_BLOCK_INFO : BfbEepOpcode.GET_EELITE_BLOCK_INFO;
 		const request = Buffer.alloc(3);
 		request.writeUInt8(opcode, 0);
 		request.writeUInt16LE(blockId, 1);
 		const response = await this.execEep(request, { responseLength: 4 });
 		return {
+			id: blockId,
 			size: response.readUInt16LE(1),
 			version: response[3],
-			storage: resolvedStorage,
 		};
 	}
 
-	async createEepBlock(
-		blockId: number,
-		size: number,
-		version: number,
-		storage: Exclude<BfbEepStorage, 'auto'>,
-	): Promise<void> {
+	async createEepBlock(blockId: number, size: number, version: number): Promise<void> {
+		const storage = getEepStorage(blockId);
 		const request = Buffer.alloc(6);
 		request.writeUInt8(storage == 'eefull' ? BfbEepOpcode.CREATE_EEFULL_BLOCK : BfbEepOpcode.CREATE_EELITE_BLOCK, 0);
 		request.writeUInt16LE(blockId, 1);
@@ -1494,17 +1694,10 @@ export class BFB extends BaseSerialProtocol {
 		});
 	}
 
-	async writeEepBlockChunk(
-		blockId: number,
-		offset: number,
-		data: Buffer,
-		storage: Exclude<BfbEepStorage, 'auto'>,
-	): Promise<void> {
-		if (data.length > BFB_EEP_MAX_WRITE_CHUNK) {
-			throw new Error(
-				`BFB EEPROM write chunk is too large: ${data.length} > ${BFB_EEP_MAX_WRITE_CHUNK}.`,
-			);
-		}
+	async writeEepBlockChunk(blockId: number, offset: number, data: Buffer): Promise<void> {
+		const storage = getEepStorage(blockId);
+		if (data.length > BFB_EEP_MAX_WRITE_CHUNK)
+			throw new Error(`BFB EEPROM write chunk is too large: ${data.length} > ${BFB_EEP_MAX_WRITE_CHUNK}.`);
 		const request = Buffer.alloc(5 + data.length);
 		request.writeUInt8(storage == 'eefull' ? BfbEepOpcode.WRITE_EEFULL_BLOCK : BfbEepOpcode.WRITE_EELITE_BLOCK, 0);
 		request.writeUInt16LE(blockId, 1);
@@ -1516,19 +1709,16 @@ export class BFB extends BaseSerialProtocol {
 		});
 	}
 
-	async finishEepBlock(blockId: number, storage: Exclude<BfbEepStorage, 'auto'>): Promise<void> {
+	async finishEepBlock(blockId: number): Promise<void> {
+		const storage = getEepStorage(blockId);
 		const request = Buffer.alloc(3);
 		request.writeUInt8(storage == 'eefull' ? BfbEepOpcode.FINISH_EEFULL_BLOCK : BfbEepOpcode.FINISH_EELITE_BLOCK, 0);
 		request.writeUInt16LE(blockId, 1);
 		await this.execEepAck(request);
 	}
 
-	async readEepBlockChunk(
-		blockId: number,
-		offset: number,
-		length: number,
-		storage: Exclude<BfbEepStorage, 'auto'>,
-	): Promise<Buffer> {
+	async readEepBlockChunk(blockId: number, offset: number, length: number): Promise<Buffer> {
+		const storage = getEepStorage(blockId);
 		if (!Number.isInteger(length) || length < 0 || length > BFB_EEP_READ_CHUNK)
 			throw new Error(`BFB EEPROM read chunk length must be in range 0..${BFB_EEP_READ_CHUNK}.`);
 		const request = Buffer.alloc(7);
@@ -1540,8 +1730,8 @@ export class BFB extends BaseSerialProtocol {
 		return Buffer.from(response.subarray(1));
 	}
 
-	async readEepBlock(blockId: number, offset = 0, length?: number, storage: BfbEepStorage = 'auto'): Promise<Buffer> {
-		const info = await this.getEepBlockInfo(blockId, storage);
+	async readEepBlock(blockId: number, offset = 0, length?: number): Promise<Buffer> {
+		const info = await this.getEepBlockInfo(blockId);
 		if (!Number.isInteger(offset) || offset < 0 || offset > info.size)
 			throw new Error(`Invalid EEPROM block offset: ${offset}.`);
 		length ??= info.size - offset;
@@ -1551,30 +1741,26 @@ export class BFB extends BaseSerialProtocol {
 		const result = Buffer.alloc(length);
 		for (let cursor = 0; cursor < length; cursor += BFB_EEP_READ_CHUNK) {
 			const chunkSize = Math.min(length - cursor, BFB_EEP_READ_CHUNK);
-			const chunk = await this.readEepBlockChunk(blockId, offset + cursor, chunkSize, info.storage);
+			const chunk = await this.readEepBlockChunk(blockId, offset + cursor, chunkSize);
 			chunk.copy(result, cursor);
 		}
 		return result;
 	}
 
-	async writeEepBlock(blockId: number, data: Buffer, version = 0, storage: BfbEepStorage = 'auto'): Promise<void> {
-		const resolvedStorage = resolveEepStorage(blockId, storage);
-		await this.createEepBlock(blockId, data.length, version, resolvedStorage);
+	async writeEepBlock(blockId: number, data: Buffer, version = 0): Promise<void> {
+		await this.createEepBlock(blockId, data.length, version);
 
 		if (!data.length)
-			await this.writeEepBlockChunk(blockId, 0, data, resolvedStorage);
+			await this.writeEepBlockChunk(blockId, 0, data);
 		for (let offset = 0; offset < data.length; offset += BFB_EEP_WRITE_CHUNK)
-			await this.writeEepBlockChunk(blockId, offset, data.subarray(offset, offset + BFB_EEP_WRITE_CHUNK), resolvedStorage);
+			await this.writeEepBlockChunk(blockId, offset, data.subarray(offset, offset + BFB_EEP_WRITE_CHUNK));
 
-		await this.finishEepBlock(blockId, resolvedStorage);
+		await this.finishEepBlock(blockId);
 	}
 
 	async writeEefullBlockRangeChunk(blockId: number, offset: number, data: Buffer): Promise<void> {
-		if (data.length > BFB_EEP_MAX_WRITE_CHUNK) {
-			throw new Error(
-				`BFB EEFULL range-write chunk is too large: ${data.length} > ${BFB_EEP_MAX_WRITE_CHUNK}.`,
-			);
-		}
+		if (data.length > BFB_EEP_MAX_WRITE_CHUNK)
+			throw new Error(`BFB EEFULL range-write chunk is too large: ${data.length} > ${BFB_EEP_MAX_WRITE_CHUNK}.`);
 		const request = Buffer.alloc(5 + data.length);
 		request.writeUInt8(BfbEepOpcode.WRITE_EEFULL_RANGE, 0);
 		request.writeUInt16LE(blockId, 1);
@@ -1588,7 +1774,7 @@ export class BFB extends BaseSerialProtocol {
 
 	async writeEepBlockRange(blockId: number, offset: number, data: Buffer): Promise<void> {
 
-		const info = await this.getEepBlockInfo(blockId, 'eefull');
+		const info = await this.getEepBlockInfo(blockId);
 		if (offset + data.length > info.size)
 			throw new Error(`Invalid EEPROM block range: offset=${offset}, length=${data.length}, size=${info.size}.`);
 
@@ -1598,10 +1784,13 @@ export class BFB extends BaseSerialProtocol {
 			await this.writeEefullBlockRangeChunk(blockId, offset + cursor, data.subarray(cursor, cursor + BFB_EEP_WRITE_CHUNK));
 	}
 
-	async deleteEepBlock(blockId: number, storage: BfbEepStorage = 'auto'): Promise<void> {
-		const resolvedStorage = resolveEepStorage(blockId, storage);
+	async deleteEepBlock(blockId: number): Promise<void> {
+		const storage = getEepStorage(blockId);
+		const opcode = storage == 'eefull' ?
+			BfbEepOpcode.DELETE_EEFULL_BLOCK :
+			BfbEepOpcode.DELETE_EELITE_BLOCK;
 		const request = Buffer.alloc(3);
-		request.writeUInt8(resolvedStorage == 'eefull' ? BfbEepOpcode.DELETE_EEFULL_BLOCK : BfbEepOpcode.DELETE_EELITE_BLOCK, 0);
+		request.writeUInt8(opcode, 0);
 		request.writeUInt16LE(blockId, 1);
 		await this.execEepAck(request);
 	}
@@ -1612,13 +1801,13 @@ export class BFB extends BaseSerialProtocol {
 			throw new Error(`BFB EEPROM instance mismatch: ${response[1]} != ${instance}.`);
 	}
 
-	async getEepMaxBlockId(storage: Exclude<BfbEepStorage, 'auto'>): Promise<number> {
+	async getEepMaxBlockId(storage: BfbEepStorage): Promise<number> {
 		const opcode = storage == 'eefull' ? BfbEepOpcode.GET_EEFULL_MAX_BLOCK_ID : BfbEepOpcode.GET_EELITE_MAX_BLOCK_ID;
 		const response = await this.execEep(Buffer.from([opcode]), { responseLength: 3 });
 		return response.readUInt16LE(1);
 	}
 
-	async getEepSpaceInfo(storage: Exclude<BfbEepStorage, 'auto'>): Promise<BfbEepSpaceInfo> {
+	async getEepSpaceInfo(storage: BfbEepStorage): Promise<BfbEepSpaceInfo> {
 		const opcode = storage == 'eefull' ? BfbEepOpcode.GET_EEFULL_SPACE_INFO : BfbEepOpcode.GET_EELITE_SPACE_INFO;
 		const response = await this.execEep(Buffer.from([opcode]), { responseLength: 13 });
 		return {
@@ -1651,24 +1840,13 @@ export class BFB extends BaseSerialProtocol {
 		});
 	}
 
-	private async receiveCommandData(
-		channel: number,
-		opcode: number,
-		timeout: number,
-	): Promise<Buffer> {
-		const frame = await this.receiveBfbFrame(channel, opcode, Date.now() + timeout);
-		if (frame.data.length == 1)
-			throw new BfbUnsupportedCommandError(channel, opcode);
-		return Buffer.from(frame.data.subarray(1));
-	}
-
 	private async setRfChannel(opcode: number, arfcn: number, control: number): Promise<void> {
 		const request = Buffer.alloc(5);
 		request.writeUInt8(opcode, 0);
 		request.writeUInt16LE(arfcn, 1);
 		request.writeUInt8(control, 3);
 		request.writeUInt8(1, 4);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	private async setRfBandChannel(
@@ -1685,7 +1863,7 @@ export class BFB extends BaseSerialProtocol {
 		request.writeUInt8(control, 4);
 		request.writeUInt8(mode, 5);
 		request.writeUInt8(1, 6);
-		await this.execAck(BfbChannel.HARDWARE, request);
+		await this.exec(BfbChannel.HARDWARE, request);
 	}
 
 	private async execEep(request: Buffer, options: BfbEepExecOptions = {}): Promise<Buffer> {
@@ -1716,57 +1894,20 @@ export class BFB extends BaseSerialProtocol {
 				}
 				if (validOptions.responseLength !== undefined && validOptions.responseLength > 1 && response.length == 1)
 					throw new BfbUnsupportedCommandError(BfbChannel.EEPROM, opcode);
-				if (validOptions.responseLength !== undefined && response.length != validOptions.responseLength)
-					throw new Error(`Invalid BFB EEPROM response length: ${response.length}, expected ${validOptions.responseLength}.`);
+				if (validOptions.responseLength !== undefined && response.length != validOptions.responseLength) {
+					throw new Error(
+						`Invalid BFB EEPROM response length: ${response.length}, expected ${validOptions.responseLength}.`,
+					);
+				}
 				return response;
 			}
 		});
 	}
 
-	private async execEepAck(
-		request: Buffer,
-		options: BfbEepExecOptions = {},
-	): Promise<void> {
+	private async execEepAck(request: Buffer, options: BfbEepExecOptions = {}): Promise<void> {
 		await this.execEep(request, { ...options, responseLength: 1 });
 	}
 
-	private async execStatusZero(
-		channel: number,
-		request: Buffer,
-		exactResponseLength = true,
-	): Promise<void> {
-		const response = await this.exec(channel, request, exactResponseLength ? { responseLength: 2 } : { minResponseLength: 2 });
-		if (response[1] != 0) {
-			const command = getBfbOpcodeName(channel, request[0]) ?? 'command';
-			throw new BfbRemoteError(response[1], sprintf('BFB %s failed: 0x%02X', command, response[1]));
-		}
-	}
-
-	private async execAck(channel: number, request: Buffer | number[]): Promise<void> {
-		await this.exec(channel, request);
-	}
-
-	private async readUInt8Command(channel: number, opcode: number): Promise<number> {
-		const response = await this.exec(channel, [opcode], { responseLength: 2 });
-		return response[1];
-	}
-
-	private async readUInt16Command(channel: number, opcode: number): Promise<number> {
-		const response = await this.exec(channel, [opcode], { responseLength: 3 });
-		return response.readUInt16LE(1);
-	}
-
-	private async readStringCommand(channel: number, opcode: number): Promise<string> {
-		const response = await this.exec(channel, [opcode], { minResponseLength: 2 });
-		const data = response.subarray(1);
-		const zero = data.indexOf(0);
-		return data.subarray(0, zero < 0 ? data.length : zero).toString('ascii');
-	}
-
-	private async readCommandData(channel: number, request: Buffer | number[]): Promise<Buffer> {
-		const response = await this.exec(channel, request, { minResponseLength: 2 });
-		return Buffer.from(response.subarray(1));
-	}
 }
 
 export function encodeBfbFrame(channel: number, payload: Buffer | number[]): Buffer {
@@ -1812,10 +1953,8 @@ function getBfbOpcodeName(channel: number, opcode: number): string | undefined {
 	}
 }
 
-function resolveEepStorage(blockId: number, storage: BfbEepStorage): Exclude<BfbEepStorage, 'auto'> {
-	if (storage == 'auto')
-		return blockId >= 5000 ? 'eefull' : 'eelite';
-	return storage;
+function getEepStorage(blockId: number): BfbEepStorage {
+	return blockId >= 5000 ? 'eefull' : 'eelite';
 }
 
 function createInformationElementRequest(mode: number, id: number): Buffer {
@@ -1839,11 +1978,8 @@ function encodeRemoteControlCommand(command: string): Buffer {
 	const data = Buffer.from(command, 'ascii');
 	if (data.includes(0))
 		throw new Error('BFB remote-control command must not contain a NUL byte.');
-	if (data.length > BFB_MAX_PAYLOAD_SIZE - 2) {
-		throw new Error(
-			`BFB remote-control command is too long: ${data.length} > ${BFB_MAX_PAYLOAD_SIZE - 2}.`,
-		);
-	}
+	if (data.length > BFB_MAX_PAYLOAD_SIZE - 2)
+		throw new Error(`BFB remote-control command is too long: ${data.length} > ${BFB_MAX_PAYLOAD_SIZE - 2}.`);
 	return Buffer.concat([Buffer.from([BfbAtOpcode.REMOTE_CONTROL]), data, Buffer.from([0])]);
 }
 

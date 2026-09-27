@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { BFB } from '../src/index.js';
 import { delay } from '../src/utils.js';
@@ -55,7 +56,21 @@ try {
 	await printValue('HWID', async () => (await bfb.getHardwareId()).toString(16).padStart(4, '0').toUpperCase());
 	await printValue('ESN', async () => (await bfb.getFlashSerialNumber()).toString(16).padStart(8, '0').toUpperCase());
 	await printValue('DISPLAY TYPE', () => bfb.getDisplayType());
-	await printValue('DISPLAY BUFFER', async () => `0x${(await bfb.getDisplayBufferAddress()).toString(16).padStart(8, '0').toUpperCase()}`);
+	await printValue('DISPLAY BUFFER', async () => {
+		const address = await bfb.getDisplayBufferAddress();
+		return `0x${address.toString(16).padStart(8, '0').toUpperCase()}`;
+	});
+	await printValue('SCREENSHOT', async () => {
+		const screenshot = await bfb.getDisplayBuffer();
+		await writeFile('screen.data', screenshot.buffer);
+		return {
+			type: screenshot.type,
+			width: screenshot.width,
+			height: screenshot.height,
+			bpp: screenshot.bpp,
+			bytes: screenshot.buffer.length,
+		};
+	});
 	await printValue('GPRS BLER', () => bfb.getGprsBlerCounters());
 	await printValue('AFC', () => bfb.readAfc());
 	await printValue('MOBILE MODE', () => bfb.getMobileMode());
@@ -64,13 +79,14 @@ try {
 	await printValue('POWER ASIC', () => bfb.getPowerAsicProject());
 	await printValue('FLAGS', () => bfb.getFlagStatus());
 	await printValue('SECURITY MODE', () => bfb.getSecurityModeName());
+	await printValue('MEMORY REGIONS', () => bfb.getMemoryRegions());
 	for (let selector = 0; selector <= 9; selector++)
 		await printValue(`HARDWARE INFO ${selector}`, () => bfb.getHardwareInfo(selector));
 	await printValue('EELITE MAX BLOCK', () => bfb.getEepMaxBlockId('eelite'));
 	await printValue('EELITE SPACE', () => bfb.getEepSpaceInfo('eelite'));
 	await printValue('EELITE BLOCK 1', async () => {
-		const info = await bfb.getEepBlockInfo(1, 'eelite');
-		const prefix = await bfb.readEepBlock(1, 0, Math.min(info.size, 16), 'eelite');
+		const info = await bfb.getEepBlockInfo(1);
+		const prefix = await bfb.readEepBlock(1, 0, Math.min(info.size, 16));
 		return { ...info, bytesRead: prefix.length };
 	});
 	await printValue('EEFULL MAX BLOCK', () => bfb.getEepMaxBlockId('eefull'));
@@ -87,10 +103,10 @@ try {
 	} finally {
 		try {
 			if (keypadRedirected)
-				await bfb.redirectKeypad();
+				await bfb.restoreKeypad();
 		} finally {
 			if (displayRedirected)
-				await bfb.redirectDisplay();
+				await bfb.restoreDisplay();
 		}
 	}
 } finally {
