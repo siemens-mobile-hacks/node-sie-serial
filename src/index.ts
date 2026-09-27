@@ -1,4 +1,5 @@
 export * from './AtChannel.js';
+export * from './PPP.js';
 export * from './BFC.js';
 export * from './BFB.js';
 export * from './CGSN.js';

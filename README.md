@@ -17,6 +17,7 @@ npm i @sie-js/serial
 | BFC      | [examples/bfc.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/bfc.ts)     | Siemens Debug protocol           |
 | CGSN     | [examples/cgsn.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/cgsn.ts)   | ArmDebugger protocol             |
 | AT       | [examples/atc.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/atc.ts)     | Modem AT commadns protocol       |
+| PPP      | [examples/ppp.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/ppp.ts)     | PPP over a modem data connection |
 | BSL      | [examples/bsl.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/bsl.ts)     | Serial Bootstrap Loader protocol |
 | DWD      | [examples/dwd.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/dwd.ts)     | APOXI debug protocol (DWDIO)     |
 | CHAOS    | [examples/chaos.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/chaos.ts) | Chaos flasher protocol           |

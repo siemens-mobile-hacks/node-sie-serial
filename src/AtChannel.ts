@@ -1,6 +1,7 @@
 import createDebug from 'debug';
-import { usePromiseWithResolvers } from "./utils.js";
-import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
+import { delay, usePromiseWithResolvers } from './utils.js';
+import { BaseSerialProtocol } from './BaseSerialProtocol.js';
+import { PPP } from './PPP.js';
 
 const debug = createDebug('atc');
 
@@ -16,7 +17,7 @@ export type AtCommandOptions = {
 	binarySize?: number;
 };
 
-export type AtCommandType = "DEFAULT" | "MULTILINE" | "PREFIX" | "NO_RESPONSE" | "NO_PREFIX" | "NO_PREFIX_ALL" | "BINARY" | "NUMERIC" | "DIAL";
+export type AtCommandType = 'DEFAULT' | 'MULTILINE' | 'PREFIX' | 'NO_RESPONSE' | 'NO_PREFIX' | 'NO_PREFIX_ALL' | 'BINARY' | 'NUMERIC' | 'DIAL' | 'PPP';
 
 export type AtUnsolicitedHandler = {
 	prefix: string;
@@ -24,13 +25,13 @@ export type AtUnsolicitedHandler = {
 };
 
 export class AtChannel extends BaseSerialProtocol {
-	private buffer: string = "";
+	private buffer = Buffer.alloc(0);
 	private unsolicitedHandlers: AtUnsolicitedHandler[] = [];
 	private paused = true;
 	private currentCommand: {
 		lines: string[];
 		prefix: string;
-		type: string;
+		type: AtCommandType;
 		timeout: NodeJS.Timeout;
 		buffer?: Buffer;
 		binaryOffset: number;
@@ -47,26 +48,28 @@ export class AtChannel extends BaseSerialProtocol {
 
 	private handleSerialData(data: Buffer) {
 		const cmd = this.currentCommand;
-		if (cmd && cmd.type == "BINARY") {
+		if (cmd && cmd.type == 'BINARY') {
 			const chunkSize = Math.min(data.length, cmd.buffer!.length - cmd.binaryOffset);
 			data.copy(cmd.buffer!, cmd.binaryOffset, 0, chunkSize);
 			cmd.binaryOffset += chunkSize;
 			data = data.subarray(chunkSize);
 			if (!data.length)
 				return;
-			cmd.type = "NO_RESPONSE";
+			cmd.type = 'NO_RESPONSE';
 		}
 
-		this.buffer += data.toString();
+		this.buffer = Buffer.concat([this.buffer, data]);
 
 		let newLineIndex: number;
 		do {
-			newLineIndex = this.buffer.indexOf("\r\n");
+			newLineIndex = this.buffer.indexOf('\r\n');
 			if (newLineIndex >= 0) {
-				const line = this.buffer.substring(0, newLineIndex);
-				this.buffer = this.buffer.substring(newLineIndex + 2);
+				const line = this.buffer.subarray(0, newLineIndex).toString();
+				this.buffer = this.buffer.subarray(newLineIndex + 2);
 				if (line.length > 0)
 					this.handleLine(line);
+				if (this.paused)
+					return;
 			}
 		} while (newLineIndex >= 0);
 	}
@@ -86,18 +89,20 @@ export class AtChannel extends BaseSerialProtocol {
 			return;
 		}
 
-		if (isSuccessResponse(line, cmd.type == "DIAL")) {
+		if (isSuccessResponse(line, cmd.type == 'DIAL' || cmd.type == 'PPP')) {
+			if (cmd.type == 'PPP')
+				this.pause();
 			this.resolveCurrentCommand(true, line);
 			return;
 		}
 
-		if (isErrorResponse(line, cmd.type == "DIAL")) {
+		if (isErrorResponse(line, cmd.type == 'DIAL' || cmd.type == 'PPP')) {
 			this.resolveCurrentCommand(false, line);
 			return;
 		}
 
 		switch (cmd.type) {
-			case "PREFIX":
+			case 'PREFIX':
 				if (line.startsWith(cmd.prefix)) {
 					cmd.lines.push(line);
 				} else {
@@ -105,12 +110,12 @@ export class AtChannel extends BaseSerialProtocol {
 				}
 			break;
 
-			case "NO_PREFIX_ALL":
+			case 'NO_PREFIX_ALL':
 				cmd.lines.push(line);
 				this.handleUnsolicitedLine(line);
 			break;
 
-			case "NO_PREFIX":
+			case 'NO_PREFIX':
 				if (line.match(/^[+*^!]/)) {
 					this.handleUnsolicitedLine(line);
 				} else {
@@ -118,7 +123,7 @@ export class AtChannel extends BaseSerialProtocol {
 				}
 			break;
 
-			case "NUMERIC":
+			case 'NUMERIC':
 				if (cmd.prefix.length > 0 && line.startsWith(cmd.prefix)) {
 					cmd.lines.push(line);
 				} else if (line.match(/^[0-9]/)) {
@@ -128,7 +133,7 @@ export class AtChannel extends BaseSerialProtocol {
 				}
 			break;
 
-			case "MULTILINE":
+			case 'MULTILINE':
 				if (line.startsWith(cmd.prefix)) {
 					cmd.lines.push(line);
 				} else if (cmd.lines.length > 0) {
@@ -162,7 +167,7 @@ export class AtChannel extends BaseSerialProtocol {
 		this.currentCommand = undefined;
 	}
 
-	addUnsolicitedHandler(prefix: string, callback: AtUnsolicitedHandler["callback"]) {
+	addUnsolicitedHandler(prefix: string, callback: AtUnsolicitedHandler['callback']) {
 		this.unsolicitedHandlers.push({ prefix: `${prefix}:`, callback });
 	}
 
@@ -176,19 +181,23 @@ export class AtChannel extends BaseSerialProtocol {
 
 	stop() {
 		if (!this.paused) {
-			this.paused = true;
-			this.port.off('data', this.handleSerialDataCallback);
-			this.port.off('close', this.handleSerialCloseCallback);
-			this.buffer = "";
+			this.pause();
+			this.buffer = Buffer.alloc(0);
 
 			if (this.currentCommand)
-				this.resolveCurrentCommand(false, "TIMEOUT");
+				this.resolveCurrentCommand(false, 'TIMEOUT');
 		}
 	}
 
+	private pause() {
+		this.paused = true;
+		this.port.off('data', this.handleSerialDataCallback);
+		this.port.off('close', this.handleSerialCloseCallback);
+	}
+
 	private async sendRawCommand(type: AtCommandType, cmd: string, prefix: string, { timeout, binarySize }: AtCommandOptions): Promise<AtCommandResponse> {
-		if ((type == "DEFAULT" || type == "MULTILINE") && prefix == "")
-			type = "NO_RESPONSE";
+		if ((type == 'DEFAULT' || type == 'MULTILINE') && prefix == '')
+			type = 'NO_RESPONSE';
 
 		timeout ||= 10 * 1000;
 
@@ -202,32 +211,32 @@ export class AtChannel extends BaseSerialProtocol {
 			lines: [],
 			prefix,
 			type,
-			timeout: setTimeout(() => this.resolveCurrentCommand(false, "TIMEOUT"), timeout),
+			timeout: setTimeout(() => this.resolveCurrentCommand(false, 'TIMEOUT'), timeout),
 			binaryOffset: 0,
 			promise,
 			reject,
 			resolve
 		};
 
-		if (type == "BINARY") {
+		if (type == 'BINARY') {
 			this.currentCommand.buffer = Buffer.alloc(binarySize! + 2);
 		}
 
 		debug(`AT >> ${cmd}`);
 
 		if (this.paused) {
-			this.resolveCurrentCommand(false, "PAUSED");
+			this.resolveCurrentCommand(false, 'PAUSED');
 		} else {
 			try {
 				await this.port.write(`${cmd}\r`);
 			} catch (e) {
 				console.error(`[AtChannel]`, e);
-				this.resolveCurrentCommand(false, "PORT_CLOSED");
+				this.resolveCurrentCommand(false, 'PORT_CLOSED');
 			}
 		}
 
 		const response = await promise;
-		if (type != "NO_PREFIX_ALL") {
+		if (type != 'NO_PREFIX_ALL') {
 			for (const line of response.lines)
 				debug(`AT << ${line}`);
 			if (response.status.length > 0)
@@ -238,49 +247,70 @@ export class AtChannel extends BaseSerialProtocol {
 	}
 
 	async checkCommandExists(cmd: string, timeout: number = 0) {
-		const response = await this.sendRawCommand("NO_RESPONSE", cmd, "", { timeout });
+		const response = await this.sendRawCommand('NO_RESPONSE', cmd, '', { timeout });
 		return !!(response.success || response.status.match(/^\+(CME|CMS)/));
 	}
 
-	async sendCommand(cmd: string, prefix = "", timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("PREFIX", cmd, prefix, { timeout });
+	async sendCommand(cmd: string, prefix = '', timeout = 0): Promise<AtCommandResponse> {
+		return this.sendRawCommand('PREFIX', cmd, prefix, { timeout });
 	}
 
 	async sendCommandBinaryResponse(cmd: string, binarySize: number, timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("BINARY", cmd, "", { timeout, binarySize });
+		return this.sendRawCommand('BINARY', cmd, '', { timeout, binarySize });
 	}
 
 	async sendCommandNoPrefix(cmd: string, timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("NO_PREFIX", cmd, "", { timeout });
+		return this.sendRawCommand('NO_PREFIX', cmd, '', { timeout });
 	}
 
 	async sendCommandNoPrefixAll(cmd: string, timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("NO_PREFIX_ALL", cmd, "", { timeout });
+		return this.sendRawCommand('NO_PREFIX_ALL', cmd, '', { timeout });
 	}
 
-	async sendCommandMultiline(cmd: string, prefix = "", timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("MULTILINE", cmd, prefix, { timeout });
+	async sendCommandMultiline(cmd: string, prefix = '', timeout = 0): Promise<AtCommandResponse> {
+		return this.sendRawCommand('MULTILINE', cmd, prefix, { timeout });
 	}
 
 	async sendCommandNumeric(cmd: string, timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("NUMERIC", cmd, "", { timeout });
+		return this.sendRawCommand('NUMERIC', cmd, '', { timeout });
 	}
 
-	async sendCommandNumericOrWithPrefix(cmd: string, prefix = "", timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("NUMERIC", cmd, prefix, { timeout });
+	async sendCommandNumericOrWithPrefix(cmd: string, prefix = '', timeout = 0): Promise<AtCommandResponse> {
+		return this.sendRawCommand('NUMERIC', cmd, prefix, { timeout });
 	}
 
 	async sendCommandNoResponse(cmd: string, timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("NO_RESPONSE", cmd, "", { timeout });
+		return this.sendRawCommand('NO_RESPONSE', cmd, '', { timeout });
 	}
 
 	async sendCommandDial(cmd: string, timeout = 0): Promise<AtCommandResponse> {
-		return this.sendRawCommand("DIAL", cmd, "", { timeout });
+		return this.sendRawCommand('DIAL', cmd, '', { timeout });
+	}
+
+	async connectPPP(cmd: string, timeout = 180 * 1000): Promise<PPP> {
+		const ppp = new PPP(this.port);
+		ppp.start();
+		const response = await this.sendRawCommand('PPP', cmd, '', { timeout });
+		if (!response.success) {
+			ppp.stop();
+			throw new Error(`Unable to enter PPP mode: ${response.status}`);
+		}
+
+		this.buffer = Buffer.alloc(0);
+		return ppp;
+	}
+
+	async exitDataMode(guardTime = 1100): Promise<boolean> {
+		this.start();
+		await delay(guardTime);
+		await this.port.write('+++');
+		await delay(guardTime);
+		return (await this.sendCommandNoResponse('ATH', 5000)).success;
 	}
 
 	async handshake(tries = 3): Promise<boolean> {
 		for (let i = 0; i < tries; i++) {
-			const response = await this.sendCommandNoResponse("ATQ0 V1 E0", 150);
+			const response = await this.sendCommandNoResponse('ATQ0 V1 E0', 150);
 			if (response.success)
 				return true;
 		}
@@ -292,17 +322,17 @@ function isErrorResponse(line: string, dial: boolean): boolean {
 	if (line.match(/^(ERROR|\+CMS ERROR|\+CME ERROR)/))
 		return true;
 	if (dial) {
-		if (line.match(/^(NO CARRIER|NO ANSWER|NO DIALTONE)/))
+		if (line.match(/^(BUSY|NO CARRIER|NO ANSWER|NO DIAL ?TONE)/))
 			return true;
 	}
 	return false;
 }
 
 function isSuccessResponse(line: string, dial: boolean): boolean {
-	if (line == "OK")
-		return true;
+	if (line == 'OK')
+		return !dial;
 	if (dial) {
-		if (line == "CONNECT")
+		if (line.match(/^CONNECT(?:\s|$)/))
 			return true;
 	}
 	return false;
