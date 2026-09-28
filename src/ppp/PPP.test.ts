@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { openPort } from '../examples/utils.js';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
-import { AtChannel } from './AtChannel.js';
+import { openPort } from '../../examples/utils.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
+import { AtChannel } from '#src/at/AtChannel.js';
 import { PPP, type PppConnectionInfo } from './PPP.js';
 
 const PORT_PATH = process.env.PPP_PORT ?? '/dev/ttyUSB0';

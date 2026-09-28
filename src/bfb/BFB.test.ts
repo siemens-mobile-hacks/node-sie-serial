@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
-import { openPort } from '../examples/utils.js';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
+import { openPort } from '../../examples/utils.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
 import {
 	BFB,
 	BFB_BAUD_RATES,

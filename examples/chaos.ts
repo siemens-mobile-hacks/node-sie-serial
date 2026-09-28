@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
-import { ChaosLoader } from "../src/index.js";
+import { ChaosLoader } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 
 const argv = parseArgs({

@@ -6,11 +6,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { describe, expect, test } from 'vitest';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
 import { OBEX, OBEX_TARGET_FLEXMEM, ObexDelays, ObexHeaderId, ObexOpcode, ObexProgress, parseObexHeaders } from './OBEX.js';
-import { loadEntry, PhoneEntry } from '../tests/obex/phones/entry.js';
-import { FakePhone, openFakePhonePort } from '../tests/obex/phones/fakePhone.js';
-import { obexPacket } from '../tests/obex/packets.js';
+import { loadEntry, PhoneEntry } from '../../tests/obex/phones/entry.js';
+import { FakePhone, openFakePhonePort } from '../../tests/obex/phones/fakePhone.js';
+import { obexPacket } from '../../tests/obex/packets.js';
 
 // The phones answer at once, so the protocol delays only keep their order, and a
 // lost answer is given up on quickly
@@ -19,7 +19,7 @@ const FAST: Partial<ObexDelays> = { escape: 30, flush: 10, response: 400, abort:
 const ALL_SPEEDS = [115200, 57600, 19200, 230400, 9600, 38400];
 
 // The BFB behaviors of a pre-x55 phone
-const S45 = loadEntry(path.join(path.dirname(fileURLToPath(import.meta.url)), '../tests/obex/phones/db/synthetic-S45v56.json'));
+const S45 = loadEntry(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../tests/obex/phones/db/synthetic-S45v56.json'));
 
 type PhoneOptions = {
 	model?: string;

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
-import { OBEX } from '../src/index.js';
+import { OBEX } from '@sie-js/serial';
 import { openPort } from './utils.js';
 
 const { values: argv } = parseArgs({

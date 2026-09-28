@@ -1,5 +1,5 @@
 import createDebug from 'debug';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
 import { sprintf } from "sprintf-js";
 
 const IGNITION_ON_PERIOD = 50;

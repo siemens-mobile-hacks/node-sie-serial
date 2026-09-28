@@ -1,10 +1,10 @@
 import createDebug from 'debug';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
-import { AtChannel } from './AtChannel.js';
-import { BFC } from './BFC.js';
-import { BaseSerialProtocol } from './BaseSerialProtocol.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
+import { AtChannel } from '#src/at/AtChannel.js';
+import { BFC } from '#src/bfc/BFC.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 import { ObexBfbLink, BfbTimeouts } from './ObexBfbLink.js';
-import { delay, flushInput, readExact, trySetBaudRate } from './utils.js';
+import { delay, flushInput, readExact, trySetBaudRate } from '#src/utils.js';
 
 const debug = createDebug('obex');
 const debugTrx = createDebug('obex:trx');

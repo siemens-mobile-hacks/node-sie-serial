@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { parseArgs } from 'node:util';
 import { sprintf } from 'sprintf-js';
-import { CGSN } from "../src/index.js";
+import { CGSN } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 
 const { values: argv } = parseArgs({

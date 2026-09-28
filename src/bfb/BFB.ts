@@ -1,10 +1,10 @@
 import createDebug from 'debug';
-import { AtChannel } from './AtChannel.js';
+import { AtChannel } from '#src/at/AtChannel.js';
 import { sprintf } from 'sprintf-js';
-import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from './io.js';
-import { BaseSerialProtocol } from './BaseSerialProtocol.js';
-import type { BfcDisplayBufferType } from './BFC.js';
-import { decodeCString, delay, usePromiseWithResolvers } from './utils.js';
+import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from '#src/io.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
+import type { BfcDisplayBufferType } from '#src/bfc/BFC.js';
+import { decodeCString, delay, usePromiseWithResolvers } from '#src/utils.js';
 
 const debug = createDebug('bfb');
 const debugTrx = createDebug('bfb:trx');

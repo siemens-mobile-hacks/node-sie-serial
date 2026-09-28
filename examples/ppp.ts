@@ -1,6 +1,5 @@
 import { parseArgs } from 'node:util';
-import { AtChannel, PPP, type AtCommandResponse } from '../src/index.js';
-import { delay } from '../src/utils.js';
+import { AtChannel, delay, PPP, type AtCommandResponse } from '@sie-js/serial';
 import { openPort } from './utils.js';
 
 const { values: argv } = parseArgs({

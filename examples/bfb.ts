@@ -1,7 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { BFB } from '../src/index.js';
-import { delay } from '../src/utils.js';
+import { BFB, delay } from '@sie-js/serial';
 import { openPort } from './utils.js';
 
 const { values: argv } = parseArgs({

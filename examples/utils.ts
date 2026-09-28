@@ -1,4 +1,4 @@
-import { AsyncSerialPort } from "../src/index.js";
+import { AsyncSerialPort } from '@sie-js/serial';
 import { SerialPort } from "serialport";
 import { SerialPortStream } from '@serialport/stream';
 import { SocketBinding, SocketBindingInterface } from 'serialport-bindings-socket';

@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { EBL } from "../src/index.js";
+import { EBL } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 
 const argv = parseArgs({

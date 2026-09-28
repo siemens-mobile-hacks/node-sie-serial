@@ -1,6 +1,6 @@
 import createDebug from 'debug';
 import { sprintf } from "sprintf-js";
-import { hexdump } from "./utils.js";
+import { hexdump } from '#src/utils.js';
 import {
 	ioProgressTracker,
 	ioReadMemory,
@@ -9,8 +9,8 @@ import {
 	IoReadWriteProgress,
 	ioWriteMemory,
 	IoWriteResult
-} from "./io.js";
-import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
+} from '#src/io.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
 const debug = createDebug('dwd');
 const debugTrx = createDebug('dwd:trx');

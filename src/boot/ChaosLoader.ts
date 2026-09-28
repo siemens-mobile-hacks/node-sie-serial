@@ -1,10 +1,10 @@
 import createDebug from 'debug';
-import { loadBootCode, LoadBootCodeOptions } from "./BSL.js";
+import { loadBootCode, LoadBootCodeOptions } from './BSL.js';
 import { sprintf } from 'sprintf-js';
-import { decodeCString } from './utils.js';
+import { decodeCString } from '#src/utils.js';
 import { CHAOS_BOOT_CODE } from "./chaos.bin.js";
-import { IoFlashRegion, ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from "./io.js";
-import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
+import { IoFlashRegion, ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from '#src/io.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
 const debug = createDebug("chaos");
 

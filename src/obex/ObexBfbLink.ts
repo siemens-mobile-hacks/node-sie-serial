@@ -1,8 +1,8 @@
 import createDebug from 'debug';
-import { AsyncSerialPort } from './AsyncSerialPort.js';
-import { BFB_MAX_PAYLOAD_SIZE, BfbChannel, BfbCoreOpcode, encodeBfbFrame } from './BFB.js';
-import { crc16 } from './crc16.js';
-import { flushInput, readExact, trySetBaudRate } from './utils.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
+import { BFB_MAX_PAYLOAD_SIZE, BfbChannel, BfbCoreOpcode, encodeBfbFrame } from '#src/bfb/BFB.js';
+import { crc16 } from '#src/crc16.js';
+import { flushInput, readExact, trySetBaudRate } from '#src/utils.js';
 
 const debug = createDebug('obex');
 

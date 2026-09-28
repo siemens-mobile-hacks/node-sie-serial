@@ -1,9 +1,8 @@
-import { DWD } from "../src/index.js";
+import { DWD, retryAsyncOnError } from '@sie-js/serial';
 import fs from "fs";
 import { openPort } from "./utils.js";
 import { parseArgs } from "node:util";
 import { sprintf } from "sprintf-js";
-import { retryAsyncOnError } from "../src/utils.js";
 import { loadELF } from "@sie-js/creampie";
 
 const TCM_START = 0xFFFF0000;

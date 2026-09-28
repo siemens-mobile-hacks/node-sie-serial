@@ -1,10 +1,10 @@
 import createDebug from 'debug';
-import { crc16 } from './crc16.js';
-import { AtChannel, AtCommandResponse } from './AtChannel.js';
+import { crc16 } from '#src/crc16.js';
+import { AtChannel, AtCommandResponse } from '#src/at/AtChannel.js';
 import { sprintf } from 'sprintf-js';
-import { decodeCString, delay, usePromiseWithResolvers } from './utils.js';
-import { ioReadMemory, IoReadResult, IoReadWriteOptions } from "./io.js";
-import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
+import { decodeCString, delay, usePromiseWithResolvers } from '#src/utils.js';
+import { ioReadMemory, IoReadResult, IoReadWriteOptions } from '#src/io.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
 const debug = createDebug('bfc');
 const debugTrx = createDebug('bfc:trx');

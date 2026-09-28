@@ -1,7 +1,7 @@
 import createDebug from 'debug';
 import { createHash } from 'node:crypto';
-import { BaseSerialProtocol } from './BaseSerialProtocol.js';
-import { usePromiseWithResolvers } from './utils.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
+import { usePromiseWithResolvers } from '#src/utils.js';
 
 const debug = createDebug('ppp');
 

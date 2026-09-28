@@ -1,4 +1,4 @@
-import { DWD } from "../src/index.js";
+import { DWD } from '@sie-js/serial';
 import fs from "fs";
 import { openPort } from "./utils.js";
 import { parseArgs } from "node:util";

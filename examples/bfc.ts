@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
-import { BFC, BfcHardwareInfo, BfcSoftwareInfo } from "../src/index.js";
+import { BFC, BfcHardwareInfo, BfcSoftwareInfo } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 
 const { values: argv } = parseArgs({

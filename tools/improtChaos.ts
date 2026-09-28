@@ -16,4 +16,4 @@ let output = "export const CHAOS_BOOT_CODE = Buffer.from([\n";
 output += lines.join("\n") + "\n";
 output += "]);\n";
 
-fs.writeFileSync("src/chaos.bin.ts", output);
+fs.writeFileSync('src/boot/chaos.bin.ts', output);

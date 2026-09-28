@@ -1,4 +1,4 @@
-import { DWD, DWDKeys } from "../src/index.js";
+import { DWD, DWDKeys } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 import { parseArgs } from "node:util";
 import { sprintf } from "sprintf-js";

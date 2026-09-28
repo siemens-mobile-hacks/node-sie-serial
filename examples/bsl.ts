@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { parseArgs } from 'node:util';
-import { loadBootCode } from "../src/index.js";
+import { loadBootCode } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 
 const SPECIAL_BOOTS: Record<string, Buffer> = {

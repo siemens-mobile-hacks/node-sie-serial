@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { ObexBfbLink } from './ObexBfbLink.js';
-import { openDevicePort, SerialDevice } from '../tests/obex/phones/fakePhone.js';
+import { openDevicePort, SerialDevice } from '../../tests/obex/phones/fakePhone.js';
 
 // Wire bytes of siefs' tra_send() and obexftp's bfb_stuff_data(), which frame
 // these packets byte-identically: 0x02 marks the first packet of the session,

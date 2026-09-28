@@ -1,9 +1,9 @@
 import createDebug from 'debug';
-import { AtChannel, AtCommandResponse } from "./AtChannel.js";
+import { AtChannel, AtCommandResponse } from '#src/at/AtChannel.js';
 import { sprintf } from 'sprintf-js';
-import { retryAsync } from "./utils.js";
-import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from "./io.js";
-import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
+import { retryAsync } from '#src/utils.js';
+import { ioReadMemory, IoReadResult, IoReadWriteOptions, ioWriteMemory, IoWriteResult } from '#src/io.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
 const debug = createDebug('cgsn');
 

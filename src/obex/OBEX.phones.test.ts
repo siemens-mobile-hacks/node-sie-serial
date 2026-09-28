@@ -5,11 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { OBEX, ObexDelays } from './OBEX.js';
-import { clientPlatform, isUsable, loadDatabase, PhoneEntry } from '../tests/obex/phones/entry.js';
-import { openFakePhonePort } from '../tests/obex/phones/fakePhone.js';
-import { probePhone } from '../tests/obex/phones/probe.js';
+import { clientPlatform, isUsable, loadDatabase, PhoneEntry } from '../../tests/obex/phones/entry.js';
+import { openFakePhonePort } from '../../tests/obex/phones/fakePhone.js';
+import { probePhone } from '../../tests/obex/phones/probe.js';
 
-const DB = path.join(path.dirname(fileURLToPath(import.meta.url)), '../tests/obex/phones/db');
+const DB = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../tests/obex/phones/db');
 const database = loadDatabase(DB);
 // An entry the probe could not finish, e.g. of a phone that answered no AT, or of
 // a phone without FlexMem access, has no session for the fake phone to play

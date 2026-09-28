@@ -3,7 +3,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { detectPhonePlatform, PhonePlatform } from '../../../src/OBEX.js';
+import { detectPhonePlatform, PhonePlatform } from '#src/obex/OBEX.js';
 
 // Bumped whenever a field is added, removed or changes its meaning
 export const SCHEMA_VERSION = 5;

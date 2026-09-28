@@ -1,7 +1,7 @@
 import createDebug from 'debug';
-import { delay, usePromiseWithResolvers } from './utils.js';
-import { BaseSerialProtocol } from './BaseSerialProtocol.js';
-import { PPP } from './PPP.js';
+import { delay, usePromiseWithResolvers } from '#src/utils.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
+import { PPP } from '#src/ppp/PPP.js';
 
 const debug = createDebug('atc');
 

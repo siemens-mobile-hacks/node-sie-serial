@@ -151,6 +151,6 @@ fullflash has to stay byte-identical for other projects' tests.
 * **Neither can the BFB transport.** Only phones before the x55 generation
   (S45, ME45, SL45...) wrap OBEX in BFB frames, and the emulator runs x65 and
   later phones. Its framing is unit-tested against frames that siefs and
-  obexftp's libbfb build (`src/ObexBfbLink.test.ts`), and the client against a
+  obexftp's libbfb build (`src/obex/ObexBfbLink.test.ts`), and the client against a
   hand-written S45 (`phones/db/synthetic-S45v56.json`); end to end it needs one
   of those phones on a cable.

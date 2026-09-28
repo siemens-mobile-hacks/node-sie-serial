@@ -2,7 +2,7 @@
 // real one on a cable (see target.ts).
 //
 // Every test talks to the phone's real FlexMem server over its serial port: the
-// packets are the ones src/OBEX.ts builds and the answers come out of the phone
+// packets are the ones src/obex/OBEX.ts builds and the answers come out of the phone
 // firmware. Bringing a phone up takes a while, so one session is shared by the
 // whole suite and the tests run in order.
 

@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { CGSN } from "../src/index.js";
+import { CGSN } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 import { sprintf } from 'sprintf-js';
 

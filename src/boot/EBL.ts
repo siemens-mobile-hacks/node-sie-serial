@@ -1,8 +1,8 @@
 import { sprintf } from "sprintf-js";
 import createDebug from "debug";
-import { loadBootCode, LoadBootCodeOptions } from "./BSL.js";
-import { decodeCString, hexdump } from "./utils.js";
-import { BaseSerialProtocol } from "./BaseSerialProtocol.js";
+import { loadBootCode, LoadBootCodeOptions } from './BSL.js';
+import { decodeCString, hexdump } from '#src/utils.js';
+import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
 const debug = createDebug('ebl');
 

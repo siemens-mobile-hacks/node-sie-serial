@@ -2,7 +2,7 @@
 
 `db/*.json` records how individual phones behave, one entry per model, firmware
 and cable. The fake phone (`fakePhone.ts`) plays any entry, and
-`src/OBEX.phones.test.ts` runs the OBEX client against every entry, so a phone
+`src/obex/OBEX.phones.test.ts` runs the OBEX client against every entry, so a phone
 recorded once stays in the unit tests without being plugged in.
 
 An entry records behaviors rather than a fixed session: how fast the phone
@@ -75,7 +75,7 @@ and the output show exactly what.
 
 - `loadEntry()` reads schema `SCHEMA_VERSION` only, and names every missing
   field, unknown field and wrong type at once, so a typo cannot pass as "not
-  measured". `src/OBEX.phones.test.ts` checks that every entry loads and is named
+  measured". `src/obex/OBEX.phones.test.ts` checks that every entry loads and is named
   after its id.
 - To add a behavior: add the field to `PhoneEntry` and the validator in
   `entry.ts`, bump `SCHEMA_VERSION`, measure it in `probe.ts`, play it in
@@ -117,6 +117,6 @@ and the output show exactly what.
 | `problems` | what the probe could not tell, `<step>: <why>` |
 | `evidence` | the bytes each step exchanged, with timestamps |
 
-`synthetic-S45v56.json` is written by hand: it is what `src/ObexBfbLink.ts`
+`synthetic-S45v56.json` is written by hand: it is what `src/obex/ObexBfbLink.ts`
 assumes a pre-x55 phone does, until a real S45, ME45 or SL45 replaces it.
 `emulated-EL71v41.json` is recorded from pmb887x-emu.

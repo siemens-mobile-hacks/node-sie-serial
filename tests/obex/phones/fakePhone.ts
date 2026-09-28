@@ -6,12 +6,12 @@
 
 import { SerialPortStream } from '@serialport/stream';
 import { BindingInterface, BindingPortInterface, OpenOptions, PortStatus, UpdateOptions } from '@serialport/bindings-interface';
-import { AsyncSerialPort } from '../../../src/AsyncSerialPort.js';
-import { BfbChannel, BfbCoreOpcode } from '../../../src/BFB.js';
-import { BfcFrameFlags, BfcFrameTypes } from '../../../src/BFC.js';
-import { crc16 } from '../../../src/crc16.js';
-import { ObexHeaderId, parseObexHeaders } from '../../../src/OBEX.js';
-import { ACK_PAYLOAD, encodeBfbPacket } from '../../../src/ObexBfbLink.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
+import { BfbChannel, BfbCoreOpcode } from '#src/bfb/BFB.js';
+import { BfcFrameFlags, BfcFrameTypes } from '#src/bfc/BFC.js';
+import { crc16 } from '#src/crc16.js';
+import { ObexHeaderId, parseObexHeaders } from '#src/obex/OBEX.js';
+import { ACK_PAYLOAD, encodeBfbPacket } from '#src/obex/ObexBfbLink.js';
 import { obexHeader, obexPacket } from '../packets.js';
 import { PhoneEntry } from './entry.js';
 

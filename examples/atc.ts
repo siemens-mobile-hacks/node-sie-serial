@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { AtChannel } from "../src/index.js";
+import { AtChannel } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 
 const { values: argv } = parseArgs({

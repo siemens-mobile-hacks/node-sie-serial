@@ -13,11 +13,11 @@
 // contents.
 
 import { setTimeout as delay } from 'node:timers/promises';
-import { AsyncSerialPort } from '../../../src/AsyncSerialPort.js';
-import { BfbChannel } from '../../../src/BFB.js';
-import { BFC } from '../../../src/BFC.js';
-import { forgetsFolderAfterPut, isObexResponseCode, OBEX_TARGET_FLEXMEM, ObexDirEntry, ObexHeaderId, ObexPacketWriter, parseFolderListing, parseObexHeaders } from '../../../src/OBEX.js';
-import { ACK, BFB_SPEEDS, encodeBfbPacket, HELLO, LEAVE } from '../../../src/ObexBfbLink.js';
+import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
+import { BfbChannel } from '#src/bfb/BFB.js';
+import { BFC } from '#src/bfc/BFC.js';
+import { forgetsFolderAfterPut, isObexResponseCode, OBEX_TARGET_FLEXMEM, ObexDirEntry, ObexHeaderId, ObexPacketWriter, parseFolderListing, parseObexHeaders } from '#src/obex/OBEX.js';
+import { ACK, BFB_SPEEDS, encodeBfbPacket, HELLO, LEAVE } from '#src/obex/ObexBfbLink.js';
 import { BfbBehavior, hex, ObexBehavior, PhoneEntry, RawBehavior, SCHEMA_VERSION } from './entry.js';
 
 const AT_SPEEDS = [115200, 57600, 19200, 230400, 9600, 38400];
