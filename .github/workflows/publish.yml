@@ -1,23 +1,104 @@
-name: Publish Package to npmjs
+name: Publish
+
 on:
-  release:
-    types: [published]
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+  workflow_dispatch:
+
+concurrency:
+  group: npm-publish
 
 permissions:
+  contents: write
   id-token: write
-  contents: read
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
         with:
-          node-version: '22.x'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm install --global corepack@latest npm@latest
-      - run: corepack enable pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm publish --access public --no-git-checks
+          fetch-depth: 0
+
+      - name: Check release state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if npm view "${NAME}@${VERSION}" version > /dev/null 2>&1; then
+            echo "needs_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "needs_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v6
+        if: steps.state.outputs.needs_publish == 'true'
+
+      - uses: actions/setup-node@v7
+        if: steps.state.outputs.needs_publish == 'true'
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies
+        if: steps.state.outputs.needs_publish == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        if: steps.state.outputs.needs_publish == 'true'
+        run: pnpm test
+
+      - name: Build
+        if: steps.state.outputs.needs_publish == 'true'
+        run: pnpm build
+
+      - name: Publish to npm
+        if: steps.state.outputs.needs_publish == 'true'
+        run: pnpm publish --access public --provenance --no-git-checks
+
+      - name: Generate release notes
+        if: steps.state.outputs.needs_release == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.state.outputs.tag }}
+        run: |
+          END_REF=$GITHUB_SHA
+          if git rev-parse "$RELEASE_TAG" > /dev/null 2>&1; then
+            END_REF=$RELEASE_TAG
+          fi
+
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${END_REF}^" 2> /dev/null || true)
+
+          {
+            echo "## Changes"
+            echo
+            if [ -n "$PREVIOUS_TAG" ]; then
+              git log --no-merges --pretty='- %s (%h)' "${PREVIOUS_TAG}..${END_REF}"
+              echo
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${RELEASE_TAG}"
+            else
+              git log --no-merges --pretty='- %s (%h)' "$END_REF"
+            fi
+          } > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Create GitHub release
+        if: steps.state.outputs.needs_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.state.outputs.tag }}
+        run: gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --notes-file "$RUNNER_TEMP/release-notes.md" --title "$RELEASE_TAG"
