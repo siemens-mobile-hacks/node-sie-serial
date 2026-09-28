@@ -12,17 +12,18 @@
 		"./*": "./*"
 	},
 	"imports": {
-		"#src/*": "./dist/src/*"
+		"#src/*": "./dist/src/*",
+		"#tests/*": "./dist/tests/*"
 	},
 	"scripts": {
+		"build": "tsc",
 		"test": "vitest run --project unit",
-		"test:watch": "vitest --project unit",
+		"test:bfb-hardware": "BFB_HARDWARE=1 vitest run src/bfb/BFB.test.ts",
 		"test:obex-emulator": "vitest run --project obex-emulator --no-file-parallelism",
 		"test:obex-hardware": "vitest run --project obex-hardware",
-		"build": "tsc",
-		"watch": "tsc -w",
-		"test:bfb-hardware": "BFB_HARDWARE=1 vitest run src/bfb/BFB.test.ts",
-		"test:ppp-hardware": "PPP_HARDWARE=1 vitest run src/ppp/PPP.test.ts"
+		"test:ppp-hardware": "PPP_HARDWARE=1 vitest run src/ppp/PPP.test.ts",
+		"test:watch": "vitest --project unit",
+		"watch": "tsc -w"
 	},
 	"author": "kirill.zhumarin@gmail.com",
 	"license": "MIT",
@@ -35,7 +36,6 @@
 		"!dist/src/**/*.test.*"
 	],
 	"dependencies": {
-		"@sie-js/node-serialport-bindings-cpp": "^0.0.2",
 		"sprintf-js": "^1.1.3"
 	},
 	"devDependencies": {
@@ -43,6 +43,7 @@
 		"@serialport/bindings-interface": "^1.2.2",
 		"@serialport/stream": "^13.0.0",
 		"@sie-js/creampie": "^1.0.3",
+		"@sie-js/node-serialport-bindings-cpp": "^0.0.2",
 		"@types/debug": "^4.1.13",
 		"@types/node": "^22.20.4",
 		"@types/sprintf-js": "^1.1.4",
@@ -51,7 +52,7 @@
 		"serialport": "^13.0.0",
 		"serialport-bindings-socket": "^1.0.4",
 		"tsx": "^4.23.15",
-		"typescript": "^5.9.3",
+		"typescript": "^7.0.2",
 		"vitest": "^3.2.7"
 	},
 	"packageManager": "pnpm@12.7.0+sha512.9c56477e360068d6e9dca6a92efb4e46b3dc5a52fcebf3d84d78b9736c0ded589a561621a52f68219a7a39facc63cdc079c3226ef9c9d5f02b79f74e69a807b6",

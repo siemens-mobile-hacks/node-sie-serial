@@ -1,16 +1,26 @@
 {
 	"compilerOptions": {
-		"declaration": true,
 		"rootDir": ".",
 		"outDir": "./dist",
-		"target": "ESNext",
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
+		"target": "ESNext",
+		"lib": ["ESNext"],
+		"types": ["node"],
+		"paths": {
+			"@sie-js/serial": ["./src/index.ts"],
+			"#src/*": ["./src/*"],
+			"#tests/*": ["./tests/*"]
+		},
+		"sourceMap": true,
+		"declaration": true,
+		"declarationMap": true,
+		"strict": true,
+		"noUncheckedSideEffectImports": true,
+		"moduleDetection": "force",
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,
-		"strict": true,
-		"skipLibCheck": true,
-		"lib": ["ESNext"]
+		"skipLibCheck": true
 	},
 	"include": ["src", "examples", "tests", "tools", "mmu.ts"],
 	"exclude": ["node_modules", "dist"]
