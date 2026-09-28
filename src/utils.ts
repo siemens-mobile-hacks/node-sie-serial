@@ -1,4 +1,5 @@
 import { sprintf } from "sprintf-js";
+import { AsyncSerialPort } from "./AsyncSerialPort.js";
 
 const USB_DEVICES: Record<string, string> = {
 	"067B:2303": "PL2303",
@@ -67,6 +68,52 @@ export async function retryAsyncOnError(callback: () => Promise<void>, options: 
 		}
 	}
 	throw lastError;
+}
+
+// Reads exactly size bytes, or fails once the deadline (a Date.now() timestamp) passes
+// or signal is aborted
+export async function readExact(port: AsyncSerialPort, size: number, deadline: number, signal?: AbortSignal): Promise<Buffer> {
+	const chunks: Buffer[] = [];
+	let remaining = size;
+	while (remaining > 0) {
+		if (signal?.aborted)
+			throw new Error("Serial receive cancelled.");
+		const left = deadline - Date.now();
+		if (left <= 0)
+			throw new Error("Serial receive timeout.");
+		// Short waits with a signal, so that an abort ends the read soon
+		const chunk = await port.read(remaining, Math.min(left, signal ? 250 : 2000));
+		if (!chunk?.length)
+			continue;
+		chunks.push(chunk);
+		remaining -= chunk.length;
+	}
+	return Buffer.concat(chunks);
+}
+
+// Drops input until the line has been quiet for timeout ms, but for maxTime ms at
+// most: a line that never goes quiet must not keep it forever
+export async function flushInput(port: AsyncSerialPort, timeout: number, maxTime = Math.max(3000, timeout * 10)): Promise<void> {
+	// A read without a timeout waits for the next byte, however long that takes
+	timeout = Math.max(timeout, 1);
+	const deadline = Date.now() + maxTime;
+	let chunk: Buffer | undefined;
+	do {
+		chunk = await port.read(1, timeout);
+	} while (chunk?.length && Date.now() < deadline);
+}
+
+// Switches the port to baudRate, false when the port refuses that rate: legacy
+// Windows COM ports refuse anything above 115200
+export async function trySetBaudRate(port: AsyncSerialPort, baudRate: number): Promise<boolean> {
+	try {
+		await port.update({ baudRate });
+		return true;
+	} catch (e) {
+		if (!port.isOpen)
+			throw e;
+		return false;
+	}
 }
 
 export function hexdump(buffer: Buffer) {

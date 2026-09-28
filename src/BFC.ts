@@ -220,14 +220,16 @@ export class BFC extends BaseSerialProtocol {
 		}
 	}
 
-	async connect(): Promise<void> {
+	// switchFromAt: false only looks for a phone already in BFC mode, and leaves one
+	// in AT mode alone
+	async connect({ switchFromAt = true }: { switchFromAt?: boolean } = {}): Promise<void> {
 		if (this.mode == BfcTransportMode.BFC)
 			throw new Error(`BFC already connected.`);
 
 		if (!this.port?.isOpen)
 			throw new Error(`Serial port closed.`);
 
-		if (await this.trySwitchFromAtToBfc())
+		if (switchFromAt && await this.trySwitchFromAtToBfc())
 			return;
 
 		if (await this.findOpenedBfc())
@@ -256,6 +258,13 @@ export class BFC extends BaseSerialProtocol {
 		}
 		this.handleSerialClose();
 		return;
+	}
+
+	// Release the serial port without talking to the phone. Used when the phone
+	// itself leaves BFC mode, e.g. after AT^SQWE=3 switches the wire to OBEX:
+	// the frame parser must stop consuming the bytes of the new protocol.
+	detach(): void {
+		this.handleSerialClose();
 	}
 
 	private handleSerialClose(): void {

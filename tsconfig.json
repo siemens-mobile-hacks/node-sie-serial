@@ -12,5 +12,6 @@
 		"skipLibCheck": true,
 		"lib": ["ESNext"]
 	},
+	"include": ["src", "examples", "tests", "tools", "mmu.ts"],
 	"exclude": ["node_modules", "dist"]
 }

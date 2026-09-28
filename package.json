@@ -5,8 +5,10 @@
 	"main": "dist/src/index.js",
 	"types": "dist/src/index.d.ts",
 	"scripts": {
-		"test": "vitest run",
-		"test:watch": "vitest",
+		"test": "vitest run --project unit",
+		"test:watch": "vitest --project unit",
+		"test:obex-emulator": "vitest run --project obex-emulator --no-file-parallelism",
+		"test:obex-hardware": "vitest run --project obex-hardware",
 		"build": "tsc",
 		"watch": "tsc -w",
 		"test:bfb-hardware": "BFB_HARDWARE=1 vitest run src/BFB.test.ts",
@@ -19,7 +21,8 @@
 		"url": "git+https://github.com/siemens-mobile-hacks/node-sie-serial.git"
 	},
 	"files": [
-		"./dist/src/*"
+		"./dist/src/*",
+		"!dist/src/*.test.*"
 	],
 	"dependencies": {
 		"@sie-js/node-serialport-bindings-cpp": "^0.0.2",

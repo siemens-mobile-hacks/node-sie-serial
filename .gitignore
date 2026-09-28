@@ -136,3 +136,7 @@ dist
 .pnp.*
 
 src/test.js
+
+# the e2e emulator and fullflashes (see tests/obex/README.md)
+tests/obex/.emu
+tests/obex/fullflashes

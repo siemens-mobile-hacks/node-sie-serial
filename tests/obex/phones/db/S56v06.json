@@ -1,0 +1,246 @@
+{
+	"schema": 5,
+	"id": "S56v06",
+	"source": "hardware",
+	"recorded": {
+		"date": "2026-09-28",
+		"tool": "tests/obex/phones/probe.ts"
+	},
+	"identity": {
+		"vendor": "SIEMENS",
+		"model": "S56",
+		"revision": "06"
+	},
+	"at": {
+		"speeds": [
+			115200,
+			57600,
+			19200,
+			230400,
+			9600,
+			38400
+		],
+		"latencyMs": 47,
+		"echo": true,
+		"results": {
+			"AT^SQWE=0": "OK",
+			"AT^SQWE=3": "OK"
+		}
+	},
+	"transport": "raw",
+	"bfc": null,
+	"bfb": null,
+	"raw": {
+		"escape": "plus",
+		"escapeSpeeds": [
+			115200,
+			57600,
+			19200,
+			230400,
+			9600,
+			38400
+		]
+	},
+	"obex": {
+		"connect": {
+			"code": "0xC3",
+			"version": "0x10",
+			"flags": "0x00",
+			"maxPacket": 474,
+			"connectionId": false
+		},
+		"connectionId": {
+			"without": null,
+			"with": null
+		},
+		"codes": {
+			"setpathMissing": "0xC3",
+			"getMissing": "0xC3",
+			"deleteMissing": null,
+			"deleteMissingInJava": null,
+			"abortIdle": "0xA0",
+			"disconnect": "0xA0"
+		},
+		"rootFolders": [],
+		"listingPrologue": "",
+		"writableDir": null,
+		"getChunk": null,
+		"overwrite": null,
+		"caseInsensitive": null,
+		"info": {
+			"capacity": false,
+			"available": false
+		}
+	},
+	"problems": [
+		"obex.listing: the root listing answered 0xC3",
+		"obex.files: no folder to write into was found, the file checks were skipped: give one with --dir"
+	],
+	"evidence": {
+		"at.speeds": [
+			"+0 -- baud rate 115200",
+			"+141 RX 00",
+			"+403 TX \"ATQ0 V1 E0\\r\"",
+			"+450 RX \"ATQ0 V1\"",
+			"+451 RX \" E0\\r\\r\\nOK\\r\\n\"",
+			"+452 -- ATQ0 V1 E0: OK after 48 ms, echoed",
+			"+452 -- baud rate 57600",
+			"+654 TX \"ATQ0 V1 E0\\r\"",
+			"+721 RX \"\\r\\nO\"",
+			"+722 RX \"K\\r\\n\"",
+			"+722 -- ATQ0 V1 E0: OK after 68 ms",
+			"+722 -- baud rate 19200",
+			"+925 TX \"ATQ0 V1 E0\\r\"",
+			"+970 RX \"\\r\\n\"",
+			"+971 RX \"OK\"",
+			"+972 RX \"\\r\\n\"",
+			"+972 -- ATQ0 V1 E0: OK after 47 ms",
+			"+973 -- baud rate 230400",
+			"+1175 TX \"ATQ0 V1 E0\\r\"",
+			"+1215 RX \"\\r\\nOK\\r\"",
+			"+1216 RX \"\\n\"",
+			"+1216 -- ATQ0 V1 E0: OK after 41 ms",
+			"+1216 -- baud rate 9600",
+			"+1418 TX \"ATQ0 V1 E0\\r\"",
+			"+1461 RX \"\\r\"",
+			"+1462 RX \"\\n\"",
+			"+1463 RX \"O\"",
+			"+1464 RX \"K\"",
+			"+1465 RX \"\\r\"",
+			"+1466 RX \"\\n\"",
+			"+1466 -- ATQ0 V1 E0: OK after 48 ms",
+			"+1466 -- baud rate 38400",
+			"+1669 TX \"ATQ0 V1 E0\\r\"",
+			"+1733 RX \"\\r\\nO\"",
+			"+1734 RX \"K\\r\\n\"",
+			"+1734 -- ATQ0 V1 E0: OK after 65 ms"
+		],
+		"at.identity": [
+			"+1734 -- baud rate 115200",
+			"+1937 TX \"ATQ0 V1 E0\\r\"",
+			"+1979 RX \"\\r\\nOK\\r\\n\"",
+			"+1979 -- ATQ0 V1 E0: OK after 42 ms",
+			"+1979 TX \"AT+CGMI\\r\"",
+			"+2013 RX \"\\r\\nSIEME\"",
+			"+2014 RX \"NS\\r\\n\"",
+			"+2018 RX \"\\r\\nO\"",
+			"+2019 RX \"K\\r\\n\"",
+			"+2019 -- AT+CGMI: OK after 40 ms",
+			"+2019 TX \"AT+CGMM\\r\"",
+			"+2055 RX \"\\r\\nS56\\r\\n\"",
+			"+2060 RX \"\\r\\nO\"",
+			"+2061 RX \"K\\r\\n\"",
+			"+2061 -- AT+CGMM: OK after 42 ms",
+			"+2061 TX \"AT+CGMR\\r\"",
+			"+2096 RX \"\\r\\n\"",
+			"+2097 RX \"06\\r\\n\"",
+			"+2102 RX \"\\r\\nOK\\r\\n\"",
+			"+2102 -- AT+CGMR: OK after 41 ms"
+		],
+		"at.mode": [
+			"+2102 TX \"AT^SQWE=0\\r\"",
+			"+2139 RX \"\\r\\nOK\\r\\n\"",
+			"+2139 -- AT^SQWE=0: OK after 37 ms",
+			"+2340 TX \"AT^SQWE=3\\r\"",
+			"+2351 RX \"\\r\\nOK\\r\\n\"",
+			"+2351 -- AT^SQWE=3: OK after 11 ms"
+		],
+		"obex.connect": [
+			"+2652 TX 80001a100040064600136b01cb31410611d49a770050da3f471f",
+			"+2660 RX c30007100001da"
+		],
+		"obex.connectionId": [
+			"+2661 -- no connection id in the CONNECT answer"
+		],
+		"obex.listing": [
+			"+2661 TX 8500080200010003",
+			"+2663 RX c30003",
+			"+2663 TX 83001c420019782d6f6265782f666f6c6465722d6c697374696e6700",
+			"+2667 RX c30003",
+			"+2667 -- PROBLEM: the root listing answered 0xC3",
+			"+2667 -- root folders: "
+		],
+		"obex.dir": [
+			"+2667 TX 8500080200010003",
+			"+2670 RX c30003",
+			"+2670 TX 83001c420019782d6f6265782f666f6c6465722d6c697374696e6700",
+			"+2674 RX c30003",
+			"+2674 -- none of /Data/Misc, /Data/System/tmp, /tmp, /Misc, /Bitmap, /Inbox is listed, give a folder to write into with --dir"
+		],
+		"obex.codes": [
+			"+2674 TX 85002c020001002700700072006f00620065002d006d0069007300730069006e0067002d0064006900720000",
+			"+2680 RX c3",
+			"+2681 RX 0003",
+			"+2681 TX 8500080200010003",
+			"+2682 RX c30003",
+			"+2683 TX 83002a01002700700072006f00620065002d006d0069007300730069006e0067002e00620069006e0000",
+			"+2688 RX c30003",
+			"+2688 TX ff0003",
+			"+2691 RX a000",
+			"+2692 RX 03",
+			"+2698 TX 810003",
+			"+2702 RX a00003"
+		],
+		"obex.files": [
+			"+2692 -- PROBLEM: no folder to write into was found, the file checks were skipped: give one with --dir"
+		],
+		"obex.java": [
+			"+2692 -- no Java folder to try a delete in"
+		],
+		"obex.info": [
+			"+2692 TX 8500080200010003",
+			"+2693 RX c3",
+			"+2694 RX 0003",
+			"+2694 TX 8300094c0006320101",
+			"+2696 RX c30003",
+			"+2696 TX 8300094c0006320102",
+			"+2698 RX c30003",
+			"+2698 -- in the root: capacity none, available none"
+		],
+		"raw.escape": [
+			"+3071 TX 810003",
+			"+3075 RX a00003",
+			"+4471 TX \"+++\"",
+			"+5486 RX \"\\r\\nOK\\r\\n\"",
+			"+6208 -- baud rate 115200",
+			"+6407 TX \"ATQ0 V1 E0\\r\"",
+			"+6451 RX \"\\r\\nOK\\r\\n\"",
+			"+6451 -- ATQ0 V1 E0: OK after 44 ms",
+			"+6451 -- baud rate 57600",
+			"+6654 TX \"ATQ0 V1 E0\\r\"",
+			"+6722 RX \"\\r\\nO\"",
+			"+6723 RX \"K\\r\\n\"",
+			"+6723 -- ATQ0 V1 E0: OK after 69 ms",
+			"+6723 -- baud rate 19200",
+			"+6926 TX \"ATQ0 V1 E0\\r\"",
+			"+6995 RX \"\\r\\n\"",
+			"+6996 RX \"OK\"",
+			"+6997 RX \"\\r\\n\"",
+			"+6997 -- ATQ0 V1 E0: OK after 71 ms",
+			"+6997 -- baud rate 230400",
+			"+7200 TX \"ATQ0 V1 E0\\r\"",
+			"+7250 RX \"\\r\\nOK\\r\\n\"",
+			"+7250 -- ATQ0 V1 E0: OK after 50 ms",
+			"+7250 -- baud rate 9600",
+			"+7453 TX \"ATQ0 V1 E0\\r\"",
+			"+7498 RX \"\\r\"",
+			"+7499 RX \"\\n\"",
+			"+7500 RX \"O\"",
+			"+7501 RX \"K\"",
+			"+7502 RX \"\\r\"",
+			"+7503 RX \"\\n\"",
+			"+7503 -- ATQ0 V1 E0: OK after 50 ms",
+			"+7503 -- baud rate 38400",
+			"+7706 TX \"ATQ0 V1 E0\\r\"",
+			"+7769 RX \"\\r\\n\"",
+			"+7770 RX \"OK\\r\\n\"",
+			"+7770 -- ATQ0 V1 E0: OK after 64 ms"
+		],
+		"at.restore": [
+			"+7770 -- baud rate 115200",
+			"+7973 TX \"ATE1\\r\"",
+			"+8010 RX \"\\r\\nOK\\r\\n\"",
+			"+8010 -- ATE1: OK after 37 ms"
+		]
+	}
+}
