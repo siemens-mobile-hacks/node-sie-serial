@@ -6,6 +6,7 @@ export * from './CGSN.js';
 export * from './BSL.js';
 export * from './DWD.js';
 export * from './EBL.js';
+export * from './OBEX.js';
 export * from './ChaosLoader.js';
 export * from './AsyncSerialPort.js';
 export * from './io.js';

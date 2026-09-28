@@ -21,6 +21,20 @@ npm i @sie-js/serial
 | BSL      | [examples/bsl.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/bsl.ts)     | Serial Bootstrap Loader protocol |
 | DWD      | [examples/dwd.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/dwd.ts)     | APOXI debug protocol (DWDIO)     |
 | CHAOS    | [examples/chaos.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/chaos.ts) | Chaos flasher protocol           |
+| OBEX     | [examples/obex.ts](https://github.com/siemens-mobile-hacks/node-sie-serial/blob/main/examples/obex.ts)   | FlexMem file system protocol     |
+
+# Tests
+
+```shell
+pnpm test                                             # unit tests
+pnpm test:obex-emulator                               # OBEX against an emulated phone
+OBEX_E2E_DEVICE=/dev/ttyUSB0 pnpm test:obex-hardware  # OBEX against a phone on a cable
+```
+
+The OBEX e2e tests run against a phone firmware in
+[pmb887x-emu](https://github.com/siemens-mobile-hacks/pmb887x-emu) or against a
+real phone, and skip themselves when neither is configured.
+[tests/obex/README.md](tests/obex/README.md) explains what they need.
 
 # AI-assisted contributions
 

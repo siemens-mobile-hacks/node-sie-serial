@@ -1,0 +1,79 @@
+{
+	"schema": 5,
+	"id": "synthetic-S45v56",
+	"source": "synthetic",
+	"recorded": {
+		"date": "2026-09-27",
+		"tool": "written by hand",
+		"notes": "No phone behind this entry: it is what src/ObexBfbLink.ts assumes a pre-x55 phone does. Replace it with a recording of a real S45, ME45 or SL45."
+	},
+	"identity": {
+		"vendor": "SIEMENS",
+		"model": "S45",
+		"revision": "56"
+	},
+	"at": {
+		"speeds": [
+			115200
+		],
+		"latencyMs": null,
+		"echo": null,
+		"results": {
+			"AT^SQWE=0": "ERROR",
+			"AT^SQWE=3": "ERROR",
+			"AT^SBFB=1": "OK"
+		}
+	},
+	"transport": "bfb",
+	"bfc": null,
+	"bfb": {
+		"helloSpeed": 57600,
+		"helloAnswer": "02020014aa",
+		"ackFrame": "16021401fe",
+		"ackBeforeResponse": true,
+		"firstMarker": "0x02",
+		"laterMarker": "0x03",
+		"sequence": "counter",
+		"leaveSpeeds": [
+			115200
+		]
+	},
+	"raw": null,
+	"obex": {
+		"connect": {
+			"code": "0xA0",
+			"version": "0x10",
+			"flags": "0x00",
+			"maxPacket": 512,
+			"connectionId": false
+		},
+		"connectionId": {
+			"without": null,
+			"with": null
+		},
+		"codes": {
+			"setpathMissing": "0xC4",
+			"getMissing": "0xC4",
+			"deleteMissing": "0xC4",
+			"deleteMissingInJava": null,
+			"abortIdle": "0xA0",
+			"disconnect": "0xA0"
+		},
+		"rootFolders": [
+			"Misc",
+			"Pictures",
+			"Sounds"
+		],
+		"listingPrologue": "<?xml version=\"1.0\"?>\r\n<!DOCTYPE folder-listing SYSTEM \"obex-folder-listing.dtd\">\r\n<folder-listing version=\"1.0\">\r\n",
+		"writableDir": "/Misc",
+		"getChunk": 400,
+		"overwrite": "append",
+		"caseInsensitive": true,
+		"info": {
+			"capacity": true,
+			"available": true
+		}
+	},
+	"problems": [],
+	"evidence": {}
+}
