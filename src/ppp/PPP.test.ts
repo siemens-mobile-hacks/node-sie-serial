@@ -10,7 +10,7 @@ const USERNAME = process.env.PPP_USERNAME ?? '';
 const PASSWORD = process.env.PPP_PASSWORD ?? '';
 const TARGET = process.env.PPP_TARGET ?? '8.8.8.8';
 const DIAL_COMMAND = process.env.PPP_DIAL ?? 'ATDT*99***1#';
-const describeHardware = process.env.PPP_HARDWARE == '1' ? describe.sequential : describe.skip;
+const describeHardware = process.env.PPP_HARDWARE == '1' ? describe : describe.skip;
 
 describeHardware('PPP hardware', () => {
 	let port: AsyncSerialPort;

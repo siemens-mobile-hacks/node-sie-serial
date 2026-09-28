@@ -27,7 +27,7 @@ const EXEC_CODE_TARGET_MASK = 1 << 2;
 const CPU_RESOURCE_LEVEL_ADDRESS = 0x00003D0A;
 const DISPLAY_CONTRAST_BLOCK_ID = 0x138F;
 
-const describeHardware = process.env.BFB_HARDWARE == '1' ? describe.sequential : describe.skip;
+const describeHardware = process.env.BFB_HARDWARE == '1' ? describe : describe.skip;
 const testUnsafeAction = (action: string) => process.env.BFB_UNSAFE_HARDWARE == action ? test : test.skip;
 const testDestructiveAction = (action: string) => {
 	return process.env.BFB_DESTRUCTIVE_HARDWARE == action ? test : test.skip;

@@ -13,6 +13,11 @@ const phoneSession = {
 // run a real session on demand: against an emulated phone, or a phone on a cable.
 // Only the emulators need the X server of the global setup.
 export default defineConfig({
+	ssr: {
+		resolve: {
+			conditions: ['source'],
+		},
+	},
 	test: {
 		projects: [
 			{
