@@ -2,6 +2,11 @@ import createDebug from 'debug';
 import { createHash } from 'node:crypto';
 import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 import { usePromiseWithResolvers } from '#src/utils.js';
+import { ICMP } from './ICMP.js';
+import { formatIpv4Address, parseIpv4Address } from './IPv4.js';
+import { PppProtocol } from './PppProtocol.js';
+
+export { PppProtocol } from './PppProtocol.js';
 
 const debug = createDebug('ppp');
 
@@ -10,14 +15,6 @@ const PPP_ESCAPE = 0x7D;
 const PPP_ESCAPE_XOR = 0x20;
 const PPP_FCS_INITIAL = 0xFFFF;
 const PPP_FCS_GOOD = 0xF0B8;
-
-enum PppProtocol {
-	IPV4 = 0x0021,
-	IPCP = 0x8021,
-	LCP = 0xC021,
-	PAP = 0xC023,
-	CHAP = 0xC223,
-}
 
 enum PppControlCode {
 	CONFIGURE_REQUEST = 1,
@@ -63,10 +60,12 @@ enum IpcpOption {
 	SECONDARY_DNS = 131,
 }
 
-type PppPacket = {
+export type PppPacket = {
 	protocol: number;
 	payload: Buffer;
 };
+
+export type PppPacketHandler = (packet: PppPacket) => void;
 
 export type PppConnectOptions = {
 	username?: string;
@@ -106,7 +105,6 @@ export class PPP extends BaseSerialProtocol {
 	private escaped = false;
 	private running = false;
 	private identifier = 0;
-	private pingSequence = 0;
 	private receiveAccm = 0xFFFFFFFF;
 	private transmitAccm = 0xFFFFFFFF;
 	private transmitProtocolCompressed = false;
@@ -114,12 +112,15 @@ export class PPP extends BaseSerialProtocol {
 	private transmitMru = 1500;
 	private localMagic = 0;
 	private linkOpened = false;
+	private networkOpened = false;
 	private chapUsername: Buffer | undefined;
 	private chapPassword: Buffer | undefined;
 	private chapChallengeIdentifier: number | undefined;
 	private packets: PppPacket[] = [];
 	private waiter: PacketWaiter | undefined;
+	private readonly packetHandlers = new Set<PppPacketHandler>();
 	private configuredAddress: Buffer | undefined;
+	private readonly icmp = new ICMP(this);
 	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
 	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
 
@@ -183,6 +184,10 @@ export class PPP extends BaseSerialProtocol {
 			payload: frame.subarray(offset, frame.length - 2),
 		};
 		debug(`<< ${protocolName(protocol)} ${formatDebugPayload(protocol, packet.payload)}`);
+		if (this.networkOpened) {
+			this.handleOpenedPacket(packet);
+			return;
+		}
 		if (this.waiter) {
 			const waiter = this.waiter;
 			this.waiter = undefined;
@@ -206,8 +211,8 @@ export class PPP extends BaseSerialProtocol {
 		this.transmitMru = 1500;
 		this.localMagic = 0;
 		this.linkOpened = false;
+		this.networkOpened = false;
 		this.identifier = 0;
-		this.pingSequence = 0;
 		this.chapUsername = undefined;
 		this.chapPassword = undefined;
 		this.chapChallengeIdentifier = undefined;
@@ -225,6 +230,7 @@ export class PPP extends BaseSerialProtocol {
 			return;
 		this.running = false;
 		this.linkOpened = false;
+		this.networkOpened = false;
 		this.chapPassword?.fill(0);
 		this.chapUsername = undefined;
 		this.chapPassword = undefined;
@@ -233,6 +239,7 @@ export class PPP extends BaseSerialProtocol {
 		this.port.off('close', this.handleSerialCloseCallback);
 		this.frame = [];
 		this.packets = [];
+		this.packetHandlers.clear();
 		this.configuredAddress = undefined;
 		if (this.waiter) {
 			const waiter = this.waiter;
@@ -240,6 +247,19 @@ export class PPP extends BaseSerialProtocol {
 			clearTimeout(waiter.timer);
 			waiter.resolve(undefined);
 		}
+	}
+
+	onPacket(callback: PppPacketHandler): () => void {
+		this.packetHandlers.add(callback);
+		return () => this.packetHandlers.delete(callback);
+	}
+
+	async sendPacket(protocol: number, payload: Buffer): Promise<void> {
+		await this.send(protocol, payload);
+	}
+
+	getLocalAddress(): string {
+		return formatIpv4Address(this.getConfiguredAddress());
 	}
 
 	private async send(protocol: number, payload: Buffer | number[]) {
@@ -336,7 +356,11 @@ export class PPP extends BaseSerialProtocol {
 			await this.authenticateChap(options.username ?? '', options.password ?? '', deadline, retryInterval);
 		}
 
-		return this.configureIp(deadline, retryInterval);
+		const connection = await this.configureIp(deadline, retryInterval);
+		this.networkOpened = true;
+		for (const packet of this.packets.splice(0))
+			this.handleOpenedPacket(packet);
+		return connection;
 	}
 
 	private async authenticatePap(username: string, password: string, deadline: number, retryInterval: number) {
@@ -440,6 +464,11 @@ export class PPP extends BaseSerialProtocol {
 		while (!localOpened || !peerOpened) {
 			const packet = await this.nextPacketUntil(deadline, retryInterval);
 			if (!packet) {
+				const compatibleOptions = removeIpcpDnsOptions(requestOptions);
+				if (compatibleOptions.length != requestOptions.length) {
+					requestOptions = compatibleOptions;
+					request = this.createControlPacket(PppControlCode.CONFIGURE_REQUEST, requestOptions);
+				}
 				await this.send(PppProtocol.IPCP, request);
 				continue;
 			}
@@ -504,80 +533,15 @@ export class PPP extends BaseSerialProtocol {
 	}
 
 	async ping(address: string, timeout = 5000, payload = Buffer.from('node-sie-serial')): Promise<PppPingResult> {
-		const destination = parseIpv4Address(address);
-		const info = this.getConfiguredAddress();
-		const identifier = process.pid & 0xFFFF;
-		const sequence = this.pingSequence++ & 0xFFFF;
-		const icmp = Buffer.alloc(8 + payload.length);
-		icmp[0] = 8;
-		icmp.writeUInt16BE(identifier, 4);
-		icmp.writeUInt16BE(sequence, 6);
-		payload.copy(icmp, 8);
-		icmp.writeUInt16BE(internetChecksum(icmp), 2);
-
-		const ip = Buffer.alloc(20 + icmp.length);
-		ip[0] = 0x45;
-		ip.writeUInt16BE(ip.length, 2);
-		ip.writeUInt16BE(sequence, 4);
-		ip.writeUInt16BE(0x4000, 6);
-		ip[8] = 64;
-		ip[9] = 1;
-		info.copy(ip, 12);
-		destination.copy(ip, 16);
-		ip.writeUInt16BE(internetChecksum(ip.subarray(0, 20)), 10);
-		icmp.copy(ip, 20);
-
-		const started = Date.now();
-		const deadline = started + timeout;
-		await this.send(PppProtocol.IPV4, ip);
-		while (true) {
-			const remaining = deadline - Date.now();
-			if (remaining <= 0)
-				throw new Error(`Ping to ${address} timed out.`);
-			const packet = await this.nextPacketUntil(deadline, remaining);
-			if (!packet)
-				throw new Error(`Ping to ${address} timed out.`);
-			if (packet.protocol == PppProtocol.LCP) {
-				await this.handleLinkControl(parseControlPacket(packet.payload));
-				continue;
-			}
-			if (packet.protocol == PppProtocol.CHAP) {
-				await this.handleChap(packet.payload);
-				continue;
-			}
-			if (packet.protocol != PppProtocol.IPV4) {
-				if (packet.protocol != PppProtocol.IPCP && packet.protocol != PppProtocol.PAP)
-					await this.rejectProtocol(packet);
-				continue;
-			}
-			if (packet.payload.length < 28 || packet.payload[0] >> 4 != 4)
-				continue;
-			const headerLength = (packet.payload[0] & 0x0F) * 4;
-			const totalLength = packet.payload.readUInt16BE(2);
-			if (headerLength < 20 || totalLength < headerLength + 8 || totalLength > packet.payload.length)
-				continue;
-			if (packet.payload[9] != 1 || !packet.payload.subarray(12, 16).equals(destination) || !packet.payload.subarray(16, 20).equals(info))
-				continue;
-			if (internetChecksum(packet.payload.subarray(0, headerLength)) != 0)
-				continue;
-			const response = packet.payload.subarray(headerLength, totalLength);
-			if (internetChecksum(response) != 0)
-				continue;
-			if (response[0] != 0 || response.readUInt16BE(4) != identifier || response.readUInt16BE(6) != sequence)
-				continue;
-			return {
-				address: formatIpv4Address(packet.payload.subarray(12, 16)),
-				bytes: response.length - 8,
-				time: Date.now() - started,
-				ttl: packet.payload[8],
-			};
-		}
+		return this.icmp.ping(address, timeout, payload);
 	}
 
 	async disconnect(timeout = 2000) {
 		if (!this.running)
 			return;
 		try {
+			this.networkOpened = false;
+			this.packets = [];
 			const request = this.createControlPacket(PppControlCode.TERMINATE_REQUEST, Buffer.alloc(0));
 			await this.send(PppProtocol.LCP, request);
 			const deadline = Date.now() + timeout;
@@ -668,6 +632,31 @@ export class PPP extends BaseSerialProtocol {
 			packet.payload,
 		]).subarray(0, this.transmitMru - 4);
 		await this.send(PppProtocol.LCP, this.createControlPacket(PppControlCode.PROTOCOL_REJECT, data));
+	}
+
+	private handleOpenedPacket(packet: PppPacket): void {
+		for (const callback of this.packetHandlers) {
+			try {
+				callback(packet);
+			} catch (error) {
+				debug('PPP packet callback failed: %O', error);
+			}
+		}
+
+		void this.handleOpenedControlPacket(packet).catch((error: unknown) => {
+			debug('PPP control packet failed: %O', error);
+			this.stop();
+		});
+	}
+
+	private async handleOpenedControlPacket(packet: PppPacket): Promise<void> {
+		if (packet.protocol == PppProtocol.LCP) {
+			await this.handleLinkControl(parseControlPacket(packet.payload));
+		} else if (packet.protocol == PppProtocol.CHAP) {
+			await this.handleChap(packet.payload);
+		} else if (packet.protocol != PppProtocol.IPV4 && packet.protocol != PppProtocol.IPCP && packet.protocol != PppProtocol.PAP) {
+			await this.rejectProtocol(packet);
+		}
 	}
 
 	private async nextPacketUntil(deadline: number, interval: number): Promise<PppPacket | undefined> {
@@ -806,6 +795,11 @@ function ipcpOptions(): Buffer {
 	]);
 }
 
+function removeIpcpDnsOptions(options: Buffer): Buffer {
+	return Buffer.concat(splitOptions(options).filter((option) =>
+		option[0] != IpcpOption.PRIMARY_DNS && option[0] != IpcpOption.SECONDARY_DNS));
+}
+
 function rejectIpcpOptions(data: Buffer): Buffer {
 	return Buffer.concat(splitOptions(data).filter((option) => {
 		switch (option[0]) {
@@ -856,32 +850,6 @@ function parsePapMessage(data: Buffer): string {
 	if (data[0] > data.length - 1)
 		throw new Error('PPP peer sent a malformed PAP message.');
 	return data.subarray(1, 1 + data[0]).toString();
-}
-
-function parseIpv4Address(address: string): Buffer {
-	const parts = address.split('.');
-	if (parts.length != 4 || parts.some((part) => !part.match(/^\d{1,3}$/)))
-		throw new Error(`Invalid IPv4 address: ${address}`);
-	const octets = parts.map(Number);
-	if (octets.some((octet) => octet > 255))
-		throw new Error(`Invalid IPv4 address: ${address}`);
-	return Buffer.from(octets);
-}
-
-function formatIpv4Address(address: Buffer): string {
-	return [...address.subarray(0, 4)].join('.');
-}
-
-function internetChecksum(data: Buffer): number {
-	let sum = 0;
-	for (let offset = 0; offset < data.length; offset += 2) {
-		sum += data[offset] << 8;
-		if (offset + 1 < data.length)
-			sum += data[offset + 1];
-		while (sum > 0xFFFF)
-			sum = (sum & 0xFFFF) + (sum >>> 16);
-	}
-	return (~sum) & 0xFFFF;
 }
 
 function pppFcs(data: Buffer): number {

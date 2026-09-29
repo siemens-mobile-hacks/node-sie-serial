@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { AtChannel, delay, PPP, type AtCommandResponse } from '@sie-js/serial';
+import { AtChannel, delay, type PPP } from '@sie-js/serial';
 import { openPort } from './utils.js';
 
 const { values: argv } = parseArgs({
@@ -42,29 +42,18 @@ if (argv.help) {
 }
 
 const port = await openPort(argv.port, 115200);
-let atc: AtChannel | undefined;
+await port.open();
+const atc = new AtChannel(port);
+atc.start();
 let ppp: PPP | undefined;
-let originalContext: string | undefined;
-let contextChanged = false;
-let originallyAttached = false;
 
 try {
-	await port.open();
-	atc = new AtChannel(port);
-	atc.start();
 	if (!await atc.handshake())
 		throw new Error('AT handshake failed.');
 
-	const attachState = await atc.sendCommand('AT+CGATT?', '+CGATT:');
-	requireSuccess(attachState, 'AT+CGATT?');
-	originallyAttached = attachState.lines[0]?.match(/\+CGATT:\s*1/) != undefined;
-	const contexts = await atc.sendCommand('AT+CGDCONT?', '+CGDCONT:');
-	requireSuccess(contexts, 'AT+CGDCONT?');
-	originalContext = contexts.lines.find((line) => line.match(/^\+CGDCONT:\s*1,/));
 	const context = await atc.sendCommandNoResponse(`AT+CGDCONT=1,"IP","${argv.apn}"`);
 	if (!context.success)
 		throw new Error(`Unable to configure PDP context: ${context.status}`);
-	contextChanged = true;
 
 	console.log(`Dialing APN ${argv.apn}...`);
 	ppp = await atc.connectPPP(argv.dial, 180000);
@@ -91,48 +80,10 @@ try {
 		throw new Error(`No ping replies received from ${argv.target}.`);
 } finally {
 	try {
-		if (ppp) {
-			try {
-				await ppp.disconnect();
-			} catch {
-				ppp.stop();
-			}
-		}
-
-		if (port.isOpen && contextChanged && atc) {
-			const commandModeReady = ppp ?
-				await atc.exitDataMode() && await atc.handshake(10) :
-				await atc.handshake(10);
-			if (!commandModeReady)
-				throw new Error('Unable to return the modem to AT command mode.');
-
-			if (!originallyAttached)
-				requireSuccess(await atc.sendCommandNoResponse('AT+CGATT=0', 120000), 'AT+CGATT=0');
-			const command = originalContext ?
-				`AT+CGDCONT=${originalContext.substring(originalContext.indexOf(':') + 1).trim()}` :
-				'AT+CGDCONT=1';
-			requireSuccess(await atc.sendCommandNoResponse(command), command);
-			if (originallyAttached)
-				requireSuccess(await atc.sendCommandNoResponse('AT+CGATT=1', 120000), 'AT+CGATT=1');
-
-			const restoredAttach = await atc.sendCommand('AT+CGATT?', '+CGATT:');
-			requireSuccess(restoredAttach, 'AT+CGATT?');
-			if ((restoredAttach.lines[0]?.match(/\+CGATT:\s*1/) != undefined) != originallyAttached)
-				throw new Error('Unable to restore the original GPRS attach state.');
-			const restoredContexts = await atc.sendCommand('AT+CGDCONT?', '+CGDCONT:');
-			requireSuccess(restoredContexts, 'AT+CGDCONT?');
-			const restoredContext = restoredContexts.lines.find((line) => line.match(/^\+CGDCONT:\s*1,/));
-			if (restoredContext != originalContext)
-				throw new Error('Unable to restore the original PDP context.');
-		}
+		await ppp?.disconnect();
 	} finally {
-		atc?.stop();
+		atc.stop();
 		if (port.isOpen)
 			await port.close();
 	}
-}
-
-function requireSuccess(response: AtCommandResponse, command: string) {
-	if (!response.success)
-		throw new Error(`${command} failed: ${response.status}`);
 }
