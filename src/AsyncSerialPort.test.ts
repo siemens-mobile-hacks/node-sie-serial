@@ -1,12 +1,14 @@
 import { BindingInterface, BindingPortInterface, OpenOptions, PortStatus, SetOptions, UpdateOptions } from '@serialport/bindings-interface';
 import { describe, expect, test } from 'vitest';
 import { AsyncSerialPort, SerialReadTimeoutError } from './AsyncSerialPort.js';
+import { AsyncSerialPort as NodeAsyncSerialPort } from './AsyncSerialPort.node.js';
 
 class TestPortBinding implements BindingPortInterface {
 	readonly openOptions: Required<OpenOptions>;
 	isOpen = true;
 	readCalls = 0;
 	writeCalls = 0;
+	writes: Buffer[] = [];
 	drainCalls = 0;
 	maxParallelWrites = 0;
 	private activeWrites = 0;
@@ -68,8 +70,9 @@ class TestPortBinding implements BindingPortInterface {
 		});
 	}
 
-	async write(): Promise<void> {
+	async write(buffer: Buffer): Promise<void> {
 		this.writeCalls++;
+		this.writes.push(buffer);
 		this.activeWrites++;
 		this.maxParallelWrites = Math.max(this.maxParallelWrites, this.activeWrites);
 		if (this.writeCalls == 1)
@@ -111,7 +114,7 @@ class TestPortBinding implements BindingPortInterface {
 	}
 }
 
-async function openTestPort(): Promise<{
+async function openTestPort(highWaterMark?: number): Promise<{
 	port: AsyncSerialPort;
 	bindingPort: TestPortBinding;
 	bindingPorts: TestPortBinding[];
@@ -126,7 +129,7 @@ async function openTestPort(): Promise<{
 			return bindingPort;
 		},
 	};
-	const port = new AsyncSerialPort({ binding, path: 'test', baudRate: 115200 });
+	const port = new AsyncSerialPort({ binding, path: 'test', baudRate: 115200, highWaterMark });
 	await port.open();
 	return { port, bindingPort: bindingPort!, bindingPorts };
 }
@@ -170,6 +173,92 @@ describe('AsyncSerialPort', () => {
 			initial.subarray(48 * 1024),
 			wrapped,
 		]));
+		await port.close();
+	});
+
+	test('uses the configured high water mark as the read buffer capacity', async () => {
+		const { port, bindingPort } = await openTestPort(4);
+		bindingPort.emit(Buffer.from([1, 2, 3, 4, 5, 6]));
+		await nextTurn();
+		expect(bindingPort.readCalls).toBe(1);
+
+		expect(await port.read(2)).toEqual(Buffer.from([1, 2]));
+		await nextTurn();
+		expect(bindingPort.readCalls).toBe(2);
+		expect(await port.readExact(4)).toEqual(Buffer.from([3, 4, 5, 6]));
+		await port.close();
+	});
+
+	test('rejects an invalid high water mark', () => {
+		const binding: BindingInterface<TestPortBinding> = {
+			list: async () => [],
+			open: async (options) => new TestPortBinding(options),
+		};
+		expect(() => new AsyncSerialPort({
+			binding,
+			path: 'test',
+			baudRate: 115200,
+			highWaterMark: 0,
+		})).toThrow('High water mark must be a positive safe integer.');
+	});
+
+	test('passes binding-specific options without internal options', async () => {
+		interface CustomOpenOptions extends OpenOptions {
+			customOption: string;
+		}
+
+		let receivedOptions: CustomOpenOptions | undefined;
+		const binding: BindingInterface<TestPortBinding, CustomOpenOptions> = {
+			list: async () => [],
+			open: async (options) => {
+				receivedOptions = options;
+				return new TestPortBinding(options);
+			},
+		};
+		const port: AsyncSerialPort = new AsyncSerialPort({
+			binding,
+			path: 'test',
+			baudRate: 115200,
+			customOption: 'custom',
+			highWaterMark: 8,
+		});
+		await port.open();
+
+		expect(receivedOptions).toEqual({
+			path: 'test',
+			baudRate: 115200,
+			customOption: 'custom',
+		});
+		await port.close();
+	});
+
+	test('passes binding-specific options through the Node entry point', async () => {
+		interface CustomOpenOptions extends OpenOptions {
+			customOption: string;
+		}
+
+		let receivedOptions: CustomOpenOptions | undefined;
+		const binding: BindingInterface<TestPortBinding, CustomOpenOptions> = {
+			list: async () => [],
+			open: async (options) => {
+				receivedOptions = options;
+				return new TestPortBinding(options);
+			},
+		};
+		const port: NodeAsyncSerialPort = new NodeAsyncSerialPort({
+			binding,
+			path: 'test',
+			baudRate: 115200,
+			customOption: 'custom',
+			highWaterMark: 8,
+		});
+		await port.open();
+
+		expect(receivedOptions).toEqual({
+			path: 'test',
+			baudRate: 115200,
+			customOption: 'custom',
+		});
 		await port.close();
 	});
 
@@ -322,13 +411,14 @@ describe('AsyncSerialPort', () => {
 
 	test('serializes writes for bindings that reject overlap', async () => {
 		const { port, bindingPort } = await openTestPort();
-		const first = port.write(Buffer.from([1]));
+		const first = port.write(new Uint8Array([1]));
 		const second = port.write(Buffer.from([2]));
 		await nextTurn();
 		expect(bindingPort.writeCalls).toBe(1);
 		bindingPort.unblockWrite();
 		await Promise.all([first, second]);
 		expect(bindingPort.writeCalls).toBe(2);
+		expect(bindingPort.writes).toEqual([Buffer.from([1]), Buffer.from([2])]);
 		expect(bindingPort.maxParallelWrites).toBe(1);
 		await port.close();
 	});

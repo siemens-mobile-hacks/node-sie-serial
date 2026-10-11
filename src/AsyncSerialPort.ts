@@ -7,10 +7,11 @@ import type {
 	UpdateOptions,
 } from '@serialport/bindings-interface';
 
-const READ_BUFFER_SIZE = 64 * 1024;
+const DEFAULT_HIGH_WATER_MARK = 64 * 1024;
 
-export type AsyncSerialPortOptions = OpenOptions & {
-	binding: BindingInterface;
+export type AsyncSerialPortOptions<TOptions extends OpenOptions = OpenOptions> = TOptions & {
+	binding: BindingInterface<BindingPortInterface, TOptions>;
+	highWaterMark?: number;
 };
 
 export class SerialReadTimeoutError extends Error {
@@ -20,13 +21,13 @@ export class SerialReadTimeoutError extends Error {
 	}
 }
 
-export class AsyncSerialPort {
-	private readonly binding: BindingInterface;
-	private readonly openOptions: OpenOptions;
+export class AsyncSerialPort<TOptions extends OpenOptions = OpenOptions> {
+	private readonly binding: BindingInterface<BindingPortInterface, TOptions>;
+	private readonly openOptions: TOptions;
 	private port?: BindingPortInterface;
 	private opening?: Promise<void>;
 	private readError?: unknown;
-	private readonly readBuffer = Buffer.allocUnsafe(READ_BUFFER_SIZE);
+	private readonly readBuffer: Buffer;
 	private readBufferStart = 0;
 	private readBufferLength = 0;
 	private readonly dataWaiters = new Set<() => void>();
@@ -35,10 +36,15 @@ export class AsyncSerialPort {
 	private pendingReadCount = 0;
 	private writeQueueTail: Promise<void> = Promise.resolve();
 
-	constructor(options: AsyncSerialPortOptions) {
-		const { binding, ...openOptions } = options;
+	constructor(options: AsyncSerialPortOptions<TOptions>) {
+		const { binding, highWaterMark = DEFAULT_HIGH_WATER_MARK } = options;
+		if (!Number.isSafeInteger(highWaterMark) || highWaterMark < 1)
+			throw new RangeError('High water mark must be a positive safe integer.');
 		this.binding = binding;
-		this.openOptions = openOptions;
+		this.openOptions = { ...options };
+		Reflect.deleteProperty(this.openOptions, 'binding');
+		Reflect.deleteProperty(this.openOptions, 'highWaterMark');
+		this.readBuffer = Buffer.allocUnsafe(highWaterMark);
 	}
 
 	get isOpen(): boolean {
@@ -204,7 +210,7 @@ export class AsyncSerialPort {
 		return this.queueRead(() => this.discardUntilIdleInternal(idleTimeout, maxTimeout, signal));
 	}
 
-	write(data: Buffer | string): Promise<void> {
+	write(data: Uint8Array | string): Promise<void> {
 		let port: BindingPortInterface;
 		try {
 			port = this.getOpenPort();
