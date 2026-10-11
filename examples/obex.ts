@@ -53,8 +53,6 @@ const port = await openPort(argv.port, 115200);
 await port.open();
 
 const obex = new OBEX(port);
-port.on('error', (err) => console.error('Port error', err));
-port.on('close', () => console.error('Port close'));
 
 // A phone left in OBEX mode answers no AT commands until it is escaped or
 // power-cycled, so the session is ended on errors too

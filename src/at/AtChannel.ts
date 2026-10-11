@@ -26,8 +26,10 @@ export type AtUnsolicitedHandler = {
 
 export class AtChannel extends BaseSerialProtocol {
 	private buffer = Buffer.alloc(0);
+	private lastDataAt = 0;
 	private unsolicitedHandlers: AtUnsolicitedHandler[] = [];
 	private paused = true;
+	private receiveController?: AbortController;
 	private currentCommand: {
 		lines: string[];
 		prefix: string;
@@ -39,14 +41,12 @@ export class AtChannel extends BaseSerialProtocol {
 		resolve: (value: AtCommandResponse) => void;
 		reject: (e: Error) => void;
 	} | undefined;
-	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
-	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
-
 	private handleSerialClose() {
 		this.stop();
 	}
 
 	private handleSerialData(data: Buffer) {
+		this.lastDataAt = Date.now();
 		const cmd = this.currentCommand;
 		if (cmd && cmd.type == 'BINARY') {
 			const chunkSize = Math.min(data.length, cmd.buffer!.length - cmd.binaryOffset);
@@ -174,8 +174,9 @@ export class AtChannel extends BaseSerialProtocol {
 	start() {
 		if (this.paused) {
 			this.paused = false;
-			this.port.on('data', this.handleSerialDataCallback);
-			this.port.on('close', this.handleSerialCloseCallback);
+			const controller = new AbortController();
+			this.receiveController = controller;
+			void this.receive(controller);
 		}
 	}
 
@@ -191,8 +192,30 @@ export class AtChannel extends BaseSerialProtocol {
 
 	private pause() {
 		this.paused = true;
-		this.port.off('data', this.handleSerialDataCallback);
-		this.port.off('close', this.handleSerialCloseCallback);
+		this.receiveController?.abort();
+		this.receiveController = undefined;
+	}
+
+	private async receive(controller: AbortController): Promise<void> {
+		try {
+			while (!controller.signal.aborted) {
+				const data = await this.port.readNextChunk(controller.signal);
+				if (controller.signal.aborted)
+					break;
+				if (data)
+					this.handleSerialData(data);
+			}
+		} catch {
+			if (!controller.signal.aborted && this.receiveController == controller)
+				this.handleSerialClose();
+		}
+	}
+
+	async drain(quiet: number, maxTime = 10 * quiet): Promise<void> {
+		const deadline = Date.now() + maxTime;
+		this.lastDataAt = Date.now();
+		while (Date.now() - this.lastDataAt < quiet && Date.now() < deadline)
+			await delay(quiet - (Date.now() - this.lastDataAt));
 	}
 
 	private async sendRawCommand(type: AtCommandType, cmd: string, prefix: string, { timeout, binarySize }: AtCommandOptions): Promise<AtCommandResponse> {
@@ -289,14 +312,14 @@ export class AtChannel extends BaseSerialProtocol {
 
 	async connectPPP(cmd: string, timeout = 180 * 1000): Promise<PPP> {
 		const ppp = new PPP(this.port);
-		ppp.start();
 		const response = await this.sendRawCommand('PPP', cmd, '', { timeout });
 		if (!response.success) {
-			ppp.stop();
 			throw new Error(`Unable to enter PPP mode: ${response.status}`);
 		}
 
+		const initialData = this.buffer;
 		this.buffer = Buffer.alloc(0);
+		ppp.start(initialData);
 		return ppp;
 	}
 

@@ -41,17 +41,18 @@ function joinPath(dir: string, name: string): string {
 // How much of what the phone sent is kept for the panic check
 const RECEIVED_TAIL_SIZE = 4096;
 
-// The last bytes the phone sent, tapped below the stream so that the protocols see
-// the port unchanged. A phone that panics writes ">>EXIT<< ... FILE: ..." to its
+// The last bytes the phone sent, tapped at the port so that the protocols see the
+// data unchanged. A phone that panics writes ">>EXIT<< ... FILE: ..." to its
 // serial line and never answers again (see README.md); the OBEX client skips that
 // text as garbage, so only this tail says why the phone went quiet.
 function tapReceived(port: AsyncSerialPort): () => Buffer {
-	const binding = (port.getParentPort() as any).port;
-	const read = binding.read;
+	const binding = port.getBindingPort();
+	const read = binding.read.bind(binding);
 	let tail = Buffer.alloc(0);
-	binding.read = async (buffer: Buffer, offset: number, length: number) => {
-		const result = await read.call(binding, buffer, offset, length);
-		tail = Buffer.concat([tail, buffer.subarray(offset, offset + result.bytesRead)]).subarray(-RECEIVED_TAIL_SIZE);
+	binding.read = async (buffer, offset, length) => {
+		const result = await read(buffer, offset, length);
+		const data = result.buffer.subarray(offset, offset + result.bytesRead);
+		tail = Buffer.concat([tail, data]).subarray(-RECEIVED_TAIL_SIZE);
 		return result;
 	};
 	return () => tail;

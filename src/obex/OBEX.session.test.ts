@@ -879,11 +879,9 @@ describe.concurrent('OBEX: session recovery', { timeout: 20000 }, () => {
 		expect(phone.writes).toBe(writes);
 	});
 
-	// SerialPortStream closes the port on a failed write, and emits the error for the
-	// program to listen for, like examples/obex.ts does
+	// AsyncSerialPort closes the binding on a failed write
 	test('a failed write closes the port and is reported', async () => {
 		const phone = await fakePhone();
-		phone.port.on('error', () => {});
 		const obex = await connected(phone);
 
 		phone.failNextWrite();

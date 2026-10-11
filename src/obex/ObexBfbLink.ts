@@ -2,7 +2,6 @@ import createDebug from 'debug';
 import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
 import { BFB_MAX_PAYLOAD_SIZE, BfbChannel, BfbCoreOpcode, encodeBfbFrame } from '#src/bfb/BFB.js';
 import { crc16 } from '#src/crc16.js';
-import { flushInput, readExact, trySetBaudRate } from '#src/utils.js';
 
 const debug = createDebug('obex');
 
@@ -81,12 +80,16 @@ export class ObexBfbLink {
 
 	static async open(port: AsyncSerialPort, timeouts: BfbTimeouts): Promise<ObexBfbLink> {
 		for (const baudRate of BFB_SPEEDS) {
-			if (!await trySetBaudRate(port, baudRate)) {
+			try {
+				await port.update({ baudRate });
+			} catch (error) {
+				if (!port.isOpen)
+					throw error;
 				debug(`The port refuses ${baudRate} baud`);
 				continue;
 			}
 			for (let i = 0; i < 2; i++) {
-				await flushInput(port, timeouts.flush);
+				await port.discardUntilIdle(timeouts.flush);
 				await port.write(HELLO);
 				if ((await port.read(HELLO_ANSWER.length, timeouts.hello))?.equals(HELLO_ANSWER)) {
 					debug(`BFB link at ${baudRate} baud.`);
@@ -101,11 +104,15 @@ export class ObexBfbLink {
 	// killed program left behind
 	static async leave(port: AsyncSerialPort, timeouts: BfbTimeouts): Promise<void> {
 		for (const baudRate of BFB_SPEEDS) {
-			if (!await trySetBaudRate(port, baudRate))
+			try {
+				await port.update({ baudRate });
+			} catch (error) {
+				if (!port.isOpen)
+					throw error;
 				continue;
+			}
 			await port.write(LEAVE);
-			// Also lets the frame leave the wire before the next speed change
-			await flushInput(port, timeouts.flush);
+			await port.discardUntilIdle(timeouts.flush);
 		}
 	}
 
@@ -121,7 +128,7 @@ export class ObexBfbLink {
 			// Like siefs, acknowledge again first: the phone may still be resending a
 			// packet of its own because our acknowledgement of it got lost
 			if (attempt > 0) {
-				await flushInput(this.port, this.timeouts.flush);
+				await this.port.discardUntilIdle(this.timeouts.flush);
 				await this.port.write(ACK);
 			}
 			await this.port.write(wire);
@@ -167,7 +174,7 @@ export class ObexBfbLink {
 		if (!this.port.isOpen)
 			return;
 		await this.port.write(LEAVE);
-		await flushInput(this.port, this.timeouts.flush);
+		await this.port.discardUntilIdle(this.timeouts.flush);
 	}
 
 	// The payload of the next SERVICE_STREAM frame, skipping frames of other
@@ -178,16 +185,22 @@ export class ObexBfbLink {
 			this.answerFrame = undefined;
 			return answerFrame;
 		}
-		let header = await readExact(this.port, 3, deadline, signal);
+		const header = Buffer.allocUnsafe(3);
+		await this.port.readExactInto(header, 0, header.length, Math.max(1, deadline - Date.now()), signal);
+		signal?.throwIfAborted();
 		while (true) {
 			if ((header[0] ^ header[1]) != header[2] || header[1] > BFB_MAX_PAYLOAD_SIZE) {
-				header = Buffer.concat([header.subarray(1), await readExact(this.port, 1, deadline, signal)]);
+				header.copyWithin(0, 1);
+				await this.port.readExactInto(header, 2, 1, Math.max(1, deadline - Date.now()), signal);
+				signal?.throwIfAborted();
 				continue;
 			}
-			const payload = await readExact(this.port, header[1], deadline, signal);
+			const payload = await this.port.readExact(header[1], Math.max(1, deadline - Date.now()), signal);
+			signal?.throwIfAborted();
 			if (header[0] == BfbChannel.SERVICE_STREAM)
 				return payload;
-			header = await readExact(this.port, 3, deadline, signal);
+			await this.port.readExactInto(header, 0, header.length, Math.max(1, deadline - Date.now()), signal);
+			signal?.throwIfAborted();
 		}
 	}
 }

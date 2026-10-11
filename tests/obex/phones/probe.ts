@@ -133,13 +133,12 @@ class Wire {
 	// Whatever arrives within ms, or until done() says the answer is complete
 	async read(ms: number, done?: (data: Buffer) => boolean): Promise<Buffer> {
 		const deadline = Date.now() + ms;
-		const stream = this.port.getParentPort();
 		let data = Buffer.alloc(0);
 		while (Date.now() < deadline && !done?.(data)) {
 			const first = await this.port.read(1, Math.max(1, deadline - Date.now()));
 			if (!first?.length)
 				break;
-			const rest = stream.readableLength ? await this.port.read(stream.readableLength, 1) : undefined;
+			const rest = await this.port.readNextChunk(AbortSignal.timeout(1));
 			const chunk = Buffer.concat([first, rest ?? Buffer.alloc(0)]);
 			this.log('RX', chunk);
 			data = Buffer.concat([data, chunk]);

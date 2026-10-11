@@ -37,9 +37,6 @@ async function printValue(name: string, callback: () => Promise<unknown>): Promi
 	}
 }
 
-port.on('error', (error) => console.error('Port error', error));
-port.on('close', () => console.error('Port close'));
-
 try {
 	await port.open();
 	console.log('Connecting...');

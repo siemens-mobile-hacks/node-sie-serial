@@ -132,11 +132,7 @@ export class ChaosLoader extends BaseSerialProtocol {
 
 		await this.port.write(Buffer.from([CMD.GET_INFO]));
 
-		const response = await this.port.read(128, 1000);
-		if (!response)
-			throw new ChaosLoaderError(`ERROR: Can't get phone info! (timeout)`);
-		if (response.length != 128)
-			throw new ChaosLoaderError(`ERROR: Can't get phone info! (invalid response, ${response.length} != 128)`);
+		const response = await this.port.readExact(128, 1000);
 
 		const info: Partial<ChaosPhoneInfo> = {};
 		let offset = 0;
@@ -310,12 +306,7 @@ export class ChaosLoader extends BaseSerialProtocol {
 
 		await this.port.write(cmd);
 
-		const response = await this.port.read(2, WRITE_PAGE_TIMEOUT);
-		if (!response) {
-			throw new ChaosLoaderError(`Memory write timeout!`);
-		} else if (response.length != 2) {
-			throw new ChaosLoaderError(`Received unexpected bytes count (expected: 2, received: ${response.length})`);
-		}
+		const response = await this.port.readExact(2, WRITE_PAGE_TIMEOUT);
 
 		const status = response.readUInt16LE(0);
 		if (status == RESPONSES.CHECKSUM_ERROR) {
@@ -362,12 +353,7 @@ export class ChaosLoader extends BaseSerialProtocol {
 		cmd.writeUInt32BE(size, 5);
 		await this.port.write(cmd);
 
-		const response = await this.port.read(size + 4, READ_PAGE_TIMEOUT);
-		if (!response) {
-			throw new ChaosLoaderError(`Flash read timeout!`);
-		} else if (response.length != size + 4) {
-			throw new ChaosLoaderError(`Received unexpected bytes count (expected: ${size + 5}, received: ${response.length})`);
-		}
+		const response = await this.port.readExact(size + 4, READ_PAGE_TIMEOUT);
 
 		const status = response.readUInt16LE(size);
 		const receivedChk = response.readUInt16LE(size + 2);

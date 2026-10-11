@@ -57,9 +57,7 @@ export class EBL extends BaseSerialProtocol {
 
 		debug("Waiting response from EBL...");
 
-		const response = await this.port.read(76, 100);
-		if (!response)
-			throw new EBLError("No response from EBL! (ebl info)");
+		const response = await this.port.readExact(76, 100);
 
 		const mode = response.readUInt32LE(0);
 		const major = response.readUInt32LE(4);
@@ -140,9 +138,7 @@ export class EBL extends BaseSerialProtocol {
 	}
 
 	private async recvPacket(fromCmd: number): Promise<Buffer> {
-		const header = await this.port.read(6, 1000);
-		if (!header)
-			throw new EBLError("No response from EBL! (pkt header)");
+		const header = await this.port.readExact(6, 1000);
 		const pktStartToken = header.readUInt16LE(0);
 		const cmd = header.readUInt16LE(2);
 		const size = header.readUInt16LE(4);
@@ -153,9 +149,7 @@ export class EBL extends BaseSerialProtocol {
 		if (pktStartToken != 2)
 			throw new EBLError("Invalid packet, pktStartToken=%02X", pktStartToken);
 
-		const body = await this.port.read(size + 4, 1000);
-		if (!body)
-			throw new EBLError("No response from EBL! (pkt body)");
+		const body = await this.port.readExact(size + 4, 1000);
 
 		const chk = body.readUInt16LE(size);
 		const pktEndToken = body.readUInt16LE(size + 2);

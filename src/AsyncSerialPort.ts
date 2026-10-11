@@ -1,196 +1,504 @@
-import { SerialPortStream } from "@serialport/stream";
-import { BindingInterface, SetOptions } from "@serialport/bindings-interface";
+import type {
+	BindingInterface,
+	BindingPortInterface,
+	OpenOptions,
+	PortStatus,
+	SetOptions,
+	UpdateOptions,
+} from '@serialport/bindings-interface';
 
-type PortSignals = {
-	cts: boolean
-	dsr: boolean
-	dcd: boolean
-} | undefined;
+const READ_BUFFER_SIZE = 64 * 1024;
 
-export class AsyncSerialPort<T extends BindingInterface = BindingInterface> {
-	private readonly port: SerialPortStream<T>;
+export type AsyncSerialPortOptions = OpenOptions & {
+	binding: BindingInterface;
+};
 
-	constructor(port: SerialPortStream<T>) {
-		this.port = port;
+export class SerialReadTimeoutError extends Error {
+	constructor() {
+		super('Serial receive timeout.');
+		this.name = 'SerialReadTimeoutError';
 	}
+}
 
-	on(event: string | symbol, listener: (...args: any[]) => void) {
-		return this.port.on(event, listener);
-	}
+export class AsyncSerialPort {
+	private readonly binding: BindingInterface;
+	private readonly openOptions: OpenOptions;
+	private port?: BindingPortInterface;
+	private opening?: Promise<void>;
+	private readError?: unknown;
+	private readonly readBuffer = Buffer.allocUnsafe(READ_BUFFER_SIZE);
+	private readBufferStart = 0;
+	private readBufferLength = 0;
+	private readonly dataWaiters = new Set<() => void>();
+	private readonly spaceWaiters = new Set<() => void>();
+	private readQueueTail: Promise<void> = Promise.resolve();
+	private pendingReadCount = 0;
+	private writeQueueTail: Promise<void> = Promise.resolve();
 
-	off(event: string | symbol, listener: (...args: any[]) => void) {
-		return this.port.off(event, listener);
+	constructor(options: AsyncSerialPortOptions) {
+		const { binding, ...openOptions } = options;
+		this.binding = binding;
+		this.openOptions = openOptions;
 	}
 
 	get isOpen(): boolean {
-		return this.port.isOpen;
+		return this.port?.isOpen ?? false;
 	}
 
 	get baudRate(): number {
-		return this.port.baudRate;
+		return this.openOptions.baudRate;
 	}
 
-	async open(): Promise<void> {
-		if (this.port.isOpen)
-			return;
-		return new Promise((resolve, reject) => {
-			this.port.open((err) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
-				}
-			});
+	getBindingPort(): BindingPortInterface {
+		return this.getOpenPort();
+	}
+
+	open(): Promise<void> {
+		if (this.isOpen)
+			return Promise.resolve();
+		if (this.opening)
+			return this.opening;
+
+		const opening = this.binding.open(this.openOptions).then((port) => {
+			this.port = port;
+			this.readError = undefined;
+			this.readBufferStart = 0;
+			this.readBufferLength = 0;
+			void this.pump(port);
 		});
+		this.opening = opening;
+		const clearOpening = () => {
+			if (this.opening == opening)
+				this.opening = undefined;
+		};
+		void opening.then(clearOpening, clearOpening);
+		return opening;
 	}
 
 	async close(): Promise<void> {
-		if (!this.port.isOpen)
+		if (this.opening)
+			await this.opening;
+		const port = this.port;
+		if (!port)
 			return;
-		return new Promise((resolve, reject) => {
-			this.port.close((err) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
-				}
-			});
+
+		this.port = undefined;
+		this.readError = new Error('Port is not open');
+		this.readBufferStart = 0;
+		this.readBufferLength = 0;
+		this.notify(this.dataWaiters);
+		this.notify(this.spaceWaiters);
+		if (port.isOpen)
+			await port.close();
+	}
+
+	readByte(timeout = 0, signal?: AbortSignal): Promise<number> {
+		if (signal?.aborted)
+			return Promise.resolve(-1);
+		if (!this.pendingReadCount && !this.readError && this.port?.isOpen && this.readBufferLength)
+			return Promise.resolve(this.takeBufferedByte());
+		return this.queueRead(() => this.readByteOrTimeout(timeout, signal));
+	}
+
+	read(size: number, timeout = 0, signal?: AbortSignal): Promise<Buffer | undefined> {
+		if (!Number.isSafeInteger(size) || size < 0)
+			return Promise.reject(new RangeError('Read size must be a non-negative safe integer.'));
+		if (signal?.aborted)
+			return Promise.resolve(undefined);
+		if (!this.pendingReadCount && !this.readError && this.port?.isOpen && this.readBufferLength >= size)
+			return Promise.resolve(this.takeBuffered(size));
+		return this.queueRead(() => this.readOrTimeout(size, timeout, signal));
+	}
+
+	readExact(size: number, timeout = 0, signal?: AbortSignal): Promise<Buffer> {
+		if (!Number.isSafeInteger(size) || size < 0)
+			return Promise.reject(new RangeError('Read size must be a non-negative safe integer.'));
+		if (signal?.aborted)
+			return Promise.reject(signal.reason);
+		if (!this.pendingReadCount && !this.readError && this.port?.isOpen && this.readBufferLength >= size)
+			return Promise.resolve(this.takeBuffered(size));
+		return this.queueRead(async () => {
+			const result = Buffer.allocUnsafe(size);
+			await this.readExactIntoOrThrow(result, 0, size, timeout, signal);
+			return result;
 		});
 	}
 
-	async readByte(timeout = 0): Promise<number> {
-		const byte = await this.read(1, timeout);
-		return byte == null ? -1 : byte[0];
+	readInto(buffer: Buffer, offset = 0, length?: number, timeout = 0, signal?: AbortSignal): Promise<number> {
+		if (!Buffer.isBuffer(buffer))
+			return Promise.reject(new TypeError('Read buffer must be a Buffer.'));
+		if (!Number.isSafeInteger(offset) || offset < 0 || offset > buffer.length)
+			return Promise.reject(new RangeError('Read offset is outside the buffer.'));
+		length ??= buffer.length - offset;
+		if (!Number.isSafeInteger(length) || length < 0 || length > buffer.length - offset)
+			return Promise.reject(new RangeError('Read length is outside the buffer.'));
+		if (!length)
+			return Promise.resolve(0);
+		if (signal?.aborted)
+			return Promise.resolve(0);
+		if (!this.pendingReadCount && !this.readError && this.port?.isOpen && this.readBufferLength >= length) {
+			this.consumeBuffered(buffer, offset, length);
+			return Promise.resolve(length);
+		}
+		return this.queueRead(() => this.readIntoOrTimeout(buffer, offset, length, timeout, signal));
 	}
 
-	async read(size: number, timeout?: number): Promise<Buffer | undefined> {
-		if (!this.port.isOpen)
-			throw new Error("Port is not open");
+	readExactInto(buffer: Buffer, offset = 0, length?: number, timeout = 0, signal?: AbortSignal): Promise<void> {
+		if (!Buffer.isBuffer(buffer))
+			return Promise.reject(new TypeError('Read buffer must be a Buffer.'));
+		if (!Number.isSafeInteger(offset) || offset < 0 || offset > buffer.length)
+			return Promise.reject(new RangeError('Read offset is outside the buffer.'));
+		length ??= buffer.length - offset;
+		if (!Number.isSafeInteger(length) || length < 0 || length > buffer.length - offset)
+			return Promise.reject(new RangeError('Read length is outside the buffer.'));
+		if (signal?.aborted)
+			return Promise.reject(signal.reason);
+		if (!this.pendingReadCount && !this.readError && this.port?.isOpen && this.readBufferLength >= length) {
+			this.consumeBuffered(buffer, offset, length);
+			return Promise.resolve();
+		}
+		return this.queueRead(() => this.readExactIntoOrThrow(buffer, offset, length, timeout, signal));
+	}
 
-		if (this.port.readableLength >= size)
-			return this.port.read(size);
+	discard(size: number, timeout = 0, signal?: AbortSignal): Promise<number> {
+		if (!Number.isSafeInteger(size) || size < 0)
+			return Promise.reject(new RangeError('Discard size must be a non-negative safe integer.'));
+		if (!size || signal?.aborted)
+			return Promise.resolve(0);
+		if (!this.pendingReadCount && !this.readError && this.port?.isOpen && this.readBufferLength >= size) {
+			this.discardBuffered(size);
+			return Promise.resolve(size);
+		}
+		return this.queueRead(() => this.discardOrTimeout(size, timeout, signal));
+	}
 
-		return new Promise((resolve, reject) => {
-			let result: Buffer | undefined;
-			let bytesRead = 0;
-			let timeoutTimer: NodeJS.Timeout | undefined;
-
-			const removeListeners = () => {
-				this.port.removeListener("close", onClose);
-				this.port.removeListener("end", onEnd);
-				this.port.removeListener("error", onError);
-				this.port.removeListener("readable", onReadable);
-
-				if (timeoutTimer) {
-					clearTimeout(timeoutTimer);
-					timeoutTimer = undefined;
-				}
-			};
-			const onTimeout = () => {
-				removeListeners();
-				resolve(result?.subarray(0, bytesRead));
-			};
-			const onClose = () => {
-				removeListeners();
-				resolve(result?.subarray(0, bytesRead));
-			};
-			const onEnd = () => {
-				removeListeners();
-				resolve(result?.subarray(0, bytesRead));
-			};
-			const onError = (err: Error) => {
-				removeListeners();
-				reject(err);
-			};
-			const onReadable = () => {
-				const bytesToRead = Math.min(size - bytesRead, this.port.readableLength);
-				if (bytesToRead == 0)
-					return;
-
-				const chunk = this.port.read(bytesToRead);
-				if (!result)
-					result = Buffer.alloc(size);
-				chunk.copy(result, bytesRead);
-				bytesRead += chunk.length
-
-				if (bytesRead == size) {
-					removeListeners();
-					resolve(result?.subarray(0, bytesRead));
-				}
-			};
-
-			if (this.port.readableLength > 0)
-				onReadable();
-			if (bytesRead == size)
-				return;
-
-			this.port.on("close", onClose);
-			this.port.on("end", onEnd);
-			this.port.on("error", onError);
-			this.port.on("readable", onReadable);
-
-			if (timeout)
-				timeoutTimer = setTimeout(onTimeout, timeout);
+	readNextChunk(abortSignal?: AbortSignal): Promise<Buffer | undefined> {
+		if (abortSignal?.aborted)
+			return Promise.resolve(undefined);
+		if (!this.pendingReadCount && !this.readError && this.port?.isOpen && this.readBufferLength)
+			return Promise.resolve(this.takeBuffered(this.readBufferLength));
+		return this.queueRead(async () => {
+			if (abortSignal?.aborted)
+				return undefined;
+			this.throwReadError();
+			while (!this.readBufferLength) {
+				if (!await this.wait(this.dataWaiters, 0, abortSignal))
+					return undefined;
+				this.throwReadError();
+			}
+			if (abortSignal?.aborted)
+				return undefined;
+			return this.takeBuffered(this.readBufferLength);
 		});
 	}
 
-	async write(data: any): Promise<void> {
-		return new Promise((resolve, reject) => {
-			if (!this.port.isOpen)
-				throw new Error("Port is not open");
-			this.port.write(data, (err) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
-				}
-			});
-		});
+	discardUntilIdle(
+		idleTimeout: number,
+		maxTimeout = Math.max(3000, idleTimeout * 10),
+		signal?: AbortSignal,
+	): Promise<void> {
+		if (!Number.isSafeInteger(idleTimeout) || idleTimeout < 1)
+			return Promise.reject(new RangeError('Idle timeout must be a positive safe integer.'));
+		if (!Number.isSafeInteger(maxTimeout) || maxTimeout < idleTimeout)
+			return Promise.reject(new RangeError('Maximum timeout must be at least the idle timeout.'));
+		return this.queueRead(() => this.discardUntilIdleInternal(idleTimeout, maxTimeout, signal));
 	}
 
-	async getSignals(): Promise<PortSignals> {
-		return new Promise((resolve, reject) => {
-			if (!this.port.isOpen)
-				reject(new Error("Port is not open"));
-			this.port.get((err, signals) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve(signals);
-				}
-			});
+	write(data: Buffer | string): Promise<void> {
+		let port: BindingPortInterface;
+		try {
+			port = this.getOpenPort();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+		const write = this.writeQueueTail.then(async () => {
+			if (this.port != port || !port.isOpen)
+				throw new Error('Port is not open');
+			try {
+				await port.write(buffer);
+			} catch (error) {
+				await this.disconnect(port, error);
+				throw error;
+			}
 		});
+		this.writeQueueTail = write.catch(() => {});
+		return write;
+	}
+
+	async drain(): Promise<void> {
+		const port = this.getOpenPort();
+		const writes = this.writeQueueTail;
+		await writes;
+		if (this.port != port || !port.isOpen)
+			throw new Error('Port is not open');
+		try {
+			await port.drain();
+		} catch (error) {
+			await this.disconnect(port, error);
+			throw error;
+		}
+	}
+
+	async flush(): Promise<void> {
+		const port = this.getOpenPort();
+		const writes = this.writeQueueTail;
+		await writes;
+		if (this.port != port || !port.isOpen)
+			throw new Error('Port is not open');
+		try {
+			await port.flush();
+		} catch (error) {
+			await this.disconnect(port, error);
+			throw error;
+		}
+
+		this.discardBuffered(this.readBufferLength);
+	}
+
+	async getSignals(): Promise<PortStatus> {
+		return this.getOpenPort().get();
 	}
 
 	async setSignals(signals: SetOptions): Promise<void> {
-		return new Promise((resolve, reject) => {
-			if (!this.port.isOpen)
-				reject(new Error("Port is not open"));
-			this.port.set(signals, (err) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
+		await this.getOpenPort().set(signals);
+	}
+
+	async update(settings: UpdateOptions): Promise<void> {
+		await this.getOpenPort().update(settings);
+		this.openOptions.baudRate = settings.baudRate;
+	}
+
+	private async pump(port: BindingPortInterface): Promise<void> {
+		try {
+			while (this.port == port && port.isOpen) {
+				while (this.readBufferLength == this.readBuffer.length) {
+					if (this.port != port)
+						return;
+					await this.wait(this.spaceWaiters);
 				}
-			});
+
+				const writeOffset = (this.readBufferStart + this.readBufferLength) % this.readBuffer.length;
+				const writeLength = Math.min(
+					this.readBuffer.length - this.readBufferLength,
+					this.readBuffer.length - writeOffset,
+				);
+				const { bytesRead } = await port.read(this.readBuffer, writeOffset, writeLength);
+				if (!bytesRead)
+					throw new Error('Serial port closed.');
+				if (this.port != port)
+					return;
+				this.readBufferLength += bytesRead;
+				this.notify(this.dataWaiters);
+			}
+		} catch (error) {
+			await this.disconnect(port, error);
+		}
+	}
+
+	private queueRead<T>(action: () => Promise<T>): Promise<T> {
+		this.pendingReadCount++;
+		const result = this.readQueueTail.then(action);
+		this.readQueueTail = result.then(
+			() => { this.pendingReadCount--; },
+			() => { this.pendingReadCount--; },
+		);
+		return result;
+	}
+
+	private async readByteOrTimeout(timeout: number, signal?: AbortSignal): Promise<number> {
+		if (signal?.aborted)
+			return -1;
+		this.throwReadError();
+		if (this.readBufferLength)
+			return this.takeBufferedByte();
+		if (!await this.wait(this.dataWaiters, timeout, signal) || signal?.aborted)
+			return -1;
+		this.throwReadError();
+		return this.readBufferLength ? this.takeBufferedByte() : -1;
+	}
+
+	private async readOrTimeout(size: number, timeout: number, signal?: AbortSignal): Promise<Buffer | undefined> {
+		if (size == 0)
+			return Buffer.alloc(0);
+
+		const result = Buffer.allocUnsafe(size);
+		const bytesRead = await this.readIntoOrTimeout(result, 0, size, timeout, signal);
+		return bytesRead ? result.subarray(0, bytesRead) : undefined;
+	}
+
+	private async readIntoOrTimeout(
+		target: Buffer,
+		targetOffset: number,
+		size: number,
+		timeout: number,
+		signal?: AbortSignal,
+	): Promise<number> {
+		this.throwReadError();
+
+		let bytesRead = 0;
+		const deadline = timeout ? Date.now() + timeout : 0;
+		while (bytesRead < size) {
+			if (signal?.aborted)
+				break;
+			if (this.readBufferLength) {
+				const chunkSize = Math.min(size - bytesRead, this.readBufferLength);
+				this.consumeBuffered(target, targetOffset + bytesRead, chunkSize);
+				bytesRead += chunkSize;
+				continue;
+			}
+
+			this.throwReadError();
+			if (deadline && Date.now() >= deadline)
+				break;
+			const remainingTime = deadline ? Math.max(1, deadline - Date.now()) : 0;
+			if (!await this.wait(this.dataWaiters, remainingTime, signal))
+				break;
+		}
+
+		return bytesRead;
+	}
+
+	private async readExactIntoOrThrow(
+		target: Buffer,
+		targetOffset: number,
+		size: number,
+		timeout: number,
+		signal?: AbortSignal,
+	): Promise<void> {
+		const bytesRead = await this.readIntoOrTimeout(target, targetOffset, size, timeout, signal);
+		signal?.throwIfAborted();
+		if (bytesRead != size)
+			throw new SerialReadTimeoutError();
+	}
+
+	private async discardOrTimeout(size: number, timeout: number, signal?: AbortSignal): Promise<number> {
+		this.throwReadError();
+
+		let bytesDiscarded = 0;
+		const deadline = timeout ? Date.now() + timeout : 0;
+		while (bytesDiscarded < size) {
+			if (signal?.aborted)
+				break;
+			if (this.readBufferLength) {
+				const chunkSize = Math.min(size - bytesDiscarded, this.readBufferLength);
+				this.discardBuffered(chunkSize);
+				bytesDiscarded += chunkSize;
+				continue;
+			}
+
+			this.throwReadError();
+			if (deadline && Date.now() >= deadline)
+				break;
+			const remainingTime = deadline ? Math.max(1, deadline - Date.now()) : 0;
+			if (!await this.wait(this.dataWaiters, remainingTime, signal))
+				break;
+		}
+
+		return bytesDiscarded;
+	}
+
+	private async discardUntilIdleInternal(idleTimeout: number, maxTimeout: number, signal?: AbortSignal): Promise<void> {
+		const deadline = Date.now() + maxTimeout;
+		while (true) {
+			signal?.throwIfAborted();
+			this.throwReadError();
+			this.discardBuffered(this.readBufferLength);
+
+			const remainingTime = deadline - Date.now();
+			if (remainingTime <= 0)
+				return;
+			if (!await this.wait(this.dataWaiters, Math.min(idleTimeout, remainingTime), signal)) {
+				signal?.throwIfAborted();
+				return;
+			}
+		}
+	}
+
+	private takeBuffered(size: number): Buffer {
+		const result = Buffer.allocUnsafe(size);
+		this.consumeBuffered(result, 0, size);
+		return result;
+	}
+
+	private takeBufferedByte(): number {
+		const byte = this.readBuffer[this.readBufferStart];
+		this.readBufferStart++;
+		if (this.readBufferStart == this.readBuffer.length)
+			this.readBufferStart = 0;
+		this.readBufferLength--;
+		this.notify(this.spaceWaiters);
+		return byte;
+	}
+
+	private consumeBuffered(target: Buffer, targetOffset: number, size: number): void {
+		const firstSize = Math.min(size, this.readBuffer.length - this.readBufferStart);
+		this.readBuffer.copy(target, targetOffset, this.readBufferStart, this.readBufferStart + firstSize);
+		if (firstSize < size)
+			this.readBuffer.copy(target, targetOffset + firstSize, 0, size - firstSize);
+		this.readBufferStart = (this.readBufferStart + size) % this.readBuffer.length;
+		this.readBufferLength -= size;
+		this.notify(this.spaceWaiters);
+	}
+
+	private discardBuffered(size: number): void {
+		this.readBufferStart = (this.readBufferStart + size) % this.readBuffer.length;
+		this.readBufferLength -= size;
+		this.notify(this.spaceWaiters);
+	}
+
+	private wait(waiters: Set<() => void>, timeout = 0, signal?: AbortSignal): Promise<boolean> {
+		if (signal?.aborted)
+			return Promise.resolve(false);
+
+		return new Promise((resolve) => {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const finish = (ready: boolean) => {
+				waiters.delete(onReady);
+				if (timer)
+					clearTimeout(timer);
+				if (signal)
+					signal.removeEventListener('abort', onAbort);
+				resolve(ready);
+			};
+			const onReady = () => finish(true);
+			const onAbort = () => finish(false);
+			waiters.add(onReady);
+			if (timeout)
+				timer = setTimeout(() => finish(false), timeout);
+			if (signal)
+				signal.addEventListener('abort', onAbort, { once: true });
 		});
 	}
 
-	update(settings: { baudRate: number }): Promise<void> {
-		return new Promise((resolve, reject) => {
-			if (!this.port.isOpen)
-				reject(new Error("Port is not open"));
-			this.port.update(settings, (err) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
-				}
-			});
-		});
+	private notify(waiters: Set<() => void>): void {
+		for (const wake of waiters)
+			wake();
 	}
 
-	getParentPort(): SerialPortStream<T> {
+	private throwReadError(): void {
+		if (this.readError)
+			throw this.readError;
+		this.getOpenPort();
+	}
+
+	private getOpenPort(): BindingPortInterface {
+		if (!this.port?.isOpen)
+			throw new Error('Port is not open');
 		return this.port;
+	}
+
+	private async disconnect(port: BindingPortInterface, error: unknown): Promise<void> {
+		if (this.port != port)
+			return;
+		this.port = undefined;
+		this.readError = error;
+		this.notify(this.dataWaiters);
+		this.notify(this.spaceWaiters);
+		if (port.isOpen) {
+			try {
+				await port.close();
+			} catch {}
+		}
 	}
 }

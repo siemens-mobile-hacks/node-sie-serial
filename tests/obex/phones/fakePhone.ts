@@ -1,10 +1,9 @@
 // A phone that behaves the way a database entry (db/*.json) says: an AT interpreter,
 // BFC mode on a service cable, raw OBEX after AT^SQWE=3 or BFB frames after
 // AT^SBFB=1, and a FlexMem server with the entry's folders, response codes and file
-// semantics. openFakePhonePort() puts it behind the real SerialPortStream, where it
+// semantics. openFakePhonePort() puts it behind the real AsyncSerialPort, where it
 // sees the baud rate the client sets and answers only at the entry's speeds.
 
-import { SerialPortStream } from '@serialport/stream';
 import { BindingInterface, BindingPortInterface, OpenOptions, PortStatus, UpdateOptions } from '@serialport/bindings-interface';
 import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
 import { BfbChannel, BfbCoreOpcode } from '#src/bfb/BFB.js';
@@ -724,7 +723,7 @@ export interface SerialDevice {
 	refusedBaudRates?: number[];
 }
 
-// The serial port a device sits on, a binding of its own for SerialPortStream
+// The serial port a device sits on, exposed as a binding to AsyncSerialPort
 class DevicePortBinding implements BindingPortInterface {
 	readonly openOptions: Required<OpenOptions>;
 	isOpen = true;
@@ -793,14 +792,13 @@ class DevicePortBinding implements BindingPortInterface {
 	async drain(): Promise<void> {}
 }
 
-// A device behind the real SerialPortStream + AsyncSerialPort, the way the client
-// sees a phone on a cable
+// A device behind the real AsyncSerialPort, the way the client sees a phone on a cable
 export async function openDevicePort(device: SerialDevice, name = 'device'): Promise<AsyncSerialPort> {
 	const binding: BindingInterface<DevicePortBinding> = {
 		list: async () => [],
 		open: async (options) => new DevicePortBinding(device, options),
 	};
-	const port = new AsyncSerialPort(new SerialPortStream({ binding, path: `fake:${name}`, baudRate: 115200, autoOpen: false }));
+	const port = new AsyncSerialPort({ binding, path: `fake:${name}`, baudRate: 115200 });
 	await port.open();
 	return port;
 }

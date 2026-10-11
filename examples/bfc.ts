@@ -30,8 +30,6 @@ const port = await openPort(argv.port, 115200);
 await port.open();
 
 const bus = new BFC(port);
-port.on('error', (err) => console.error('Port error', err));
-port.on('close', () => console.error('Port close'));
 
 console.log('Connecting...');
 await bus.connect();

@@ -1,10 +1,10 @@
 import createDebug from 'debug';
-import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
+import { AsyncSerialPort, SerialReadTimeoutError } from '#src/AsyncSerialPort.js';
 import { AtChannel } from '#src/at/AtChannel.js';
 import { BFC } from '#src/bfc/BFC.js';
 import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 import { ObexBfbLink, BfbTimeouts } from './ObexBfbLink.js';
-import { delay, flushInput, readExact, trySetBaudRate } from '#src/utils.js';
+import { delay } from '#src/utils.js';
 
 const debug = createDebug('obex');
 const debugTrx = createDebug('obex:trx');
@@ -388,13 +388,13 @@ interface ObexLink {
 // with a second of silence on both sides. An AT command inside the second after
 // it would cancel the escape.
 async function escapeToAt(port: AsyncSerialPort, delays: ObexDelays): Promise<void> {
-	await flushInput(port, delays.flush);
+	await port.discardUntilIdle(delays.flush, Math.max(delays.flush, delays.abort));
 	await port.write(Buffer.from([ObexOpcode.DISCONNECT, 0x00, 0x03]));
-	await flushInput(port, delays.flush);
+	await port.discardUntilIdle(delays.flush, Math.max(delays.flush, delays.abort));
 	await delay(delays.escape);
 	await port.write('+++');
 	await delay(delays.escape);
-	await flushInput(port, delays.flush);
+	await port.discardUntilIdle(delays.flush, Math.max(delays.flush, delays.abort));
 }
 
 // OBEX packets as they are on the wire, after AT^SQWE=3 or its BFC tunneled twin
@@ -422,9 +422,10 @@ class RawObexLink implements ObexLink {
 		let opcode = -1;
 		while (Date.now() < deadline) {
 			throwIfDisconnected(signal);
-			const byte = await this.port.readByte(Math.max(1, Math.min(deadline - Date.now(), 250)));
+			const byte = await this.port.readByte(Math.max(1, deadline - Date.now()), signal);
+			throwIfDisconnected(signal);
 			if (byte == -1)
-				continue;
+				break;
 			if (isObexResponseCode(byte)) {
 				opcode = byte;
 				break;
@@ -434,12 +435,21 @@ class RawObexLink implements ObexLink {
 		if (opcode == -1)
 			throw new Error('OBEX response timeout.');
 
-		const lenBytes = await readExact(this.port, 2, deadline, signal);
-		const totalLen = lenBytes.readUInt16BE(0);
-		if (totalLen < 3)
-			throw new Error(`Invalid OBEX packet length: ${totalLen}.`);
-		const rest = await readExact(this.port, totalLen - 3, deadline, signal);
-		return Buffer.concat([Buffer.from([opcode]), lenBytes, rest]);
+		try {
+			const lenBytes = await this.port.readExact(2, Math.max(1, deadline - Date.now()), signal);
+			throwIfDisconnected(signal);
+			const totalLen = lenBytes.readUInt16BE(0);
+			if (totalLen < 3)
+				throw new Error(`Invalid OBEX packet length: ${totalLen}.`);
+			const rest = await this.port.readExact(totalLen - 3, Math.max(1, deadline - Date.now()), signal);
+			throwIfDisconnected(signal);
+			return Buffer.concat([Buffer.from([opcode]), lenBytes, rest]);
+		} catch (error) {
+			throwIfDisconnected(signal);
+			if (error instanceof SerialReadTimeoutError)
+				throw new Error('OBEX response timeout.');
+			throw error;
+		}
 	}
 
 	async close(): Promise<void> {
@@ -647,7 +657,11 @@ export class OBEX extends BaseSerialProtocol {
 		for (const [i, speed] of speeds.entries()) {
 			throwIfDisconnected(signal);
 			debug(`Probing AT handshake at ${speed} baud...`);
-			if (!await trySetBaudRate(this.port, speed)) {
+			try {
+				await this.port.update({ baudRate: speed });
+			} catch (error) {
+				if (!this.port.isOpen)
+					throw error;
 				if (baudRate)
 					throw new Error(`The serial port refuses ${baudRate} baud.`);
 				debug(`The port refuses ${speed} baud`);
@@ -677,16 +691,7 @@ export class OBEX extends BaseSerialProtocol {
 	// being taken for the next command's
 	private async drainAt(): Promise<void> {
 		const quiet = 3 * AT_PROBE_TIMEOUT;
-		const deadline = Date.now() + 10 * quiet;
-		let last = Date.now();
-		const onData = () => last = Date.now();
-		this.port.on('data', onData);
-		try {
-			while (Date.now() - last < quiet && Date.now() < deadline)
-				await delay(quiet - (Date.now() - last));
-		} finally {
-			this.port.off('data', onData);
-		}
+		await this.atc.drain(quiet);
 	}
 
 	private async readAtDeviceName(): Promise<string | undefined> {
@@ -760,11 +765,18 @@ export class OBEX extends BaseSerialProtocol {
 	// escaped for a full handshake, without it the session goes on in OBEX mode.
 	private async reopenObexMode(baudRate: number, signal: AbortSignal): Promise<boolean> {
 		const speed = baudRate || this.obexSpeed;
-		if (speed && !await trySetBaudRate(this.port, speed))
-			return false;
+		if (speed) {
+			try {
+				await this.port.update({ baudRate: speed });
+			} catch (error) {
+				if (!this.port.isOpen)
+					throw error;
+				return false;
+			}
+		}
 		const escapes = await this.escapes();
 		const link = new RawObexLink(this.port, this.delays, escapes);
-		await flushInput(this.port, this.delays.flush);
+		await this.port.discardUntilIdle(this.delays.flush, Math.max(this.delays.flush, this.delays.abort));
 		await this.port.write(Buffer.from([ObexOpcode.ABORT, 0x00, 0x03]));
 		try {
 			await link.receive(OBEX_MODE_CHECK_TIMEOUT, signal);
@@ -844,8 +856,13 @@ export class OBEX extends BaseSerialProtocol {
 		for (const speed of speeds) {
 			throwIfDisconnected(signal);
 			debug(`No BFC either, escaping at ${speed} baud in case the phone is still in raw OBEX mode...`);
-			if (!await trySetBaudRate(this.port, speed))
+			try {
+				await this.port.update({ baudRate: speed });
+			} catch (error) {
+				if (!this.port.isOpen)
+					throw error;
 				continue;
+			}
 			await escapeToAt(this.port, this.delays);
 			const atSpeed = await this.findAtSpeed(speed, signal);
 			if (atSpeed)
@@ -989,7 +1006,7 @@ export class OBEX extends BaseSerialProtocol {
 			// Not through request(): a disconnect() has aborted the session. And the
 			// rest of an interrupted exchange goes first, it would pass for the answer.
 			try {
-				await flushInput(this.port, this.delays.flush);
+				await this.port.discardUntilIdle(this.delays.flush, Math.max(this.delays.flush, this.delays.abort));
 				const done = new AbortController();
 				await link.send(data, done.signal);
 				await link.receive(this.delays.abort, done.signal);

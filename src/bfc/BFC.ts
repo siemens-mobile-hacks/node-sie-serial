@@ -128,9 +128,7 @@ export class BFC extends BaseSerialProtocol {
 	private mode = BfcTransportMode.NONE;
 	private authCache: Record<number, boolean> = {};
 	private frameReceivers: Record<number, BfcReceiver> = {};
-	private buffer = Buffer.alloc(0);
-	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
-	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
+	private receiveController?: AbortController;
 	private readonly atc = new AtChannel(this.port);
 
 	private setTransportMode(mode: BfcTransportMode): void {
@@ -141,26 +139,57 @@ export class BFC extends BaseSerialProtocol {
 		switch (mode) {
 			case BfcTransportMode.NONE:
 				debug(`Mode: NONE`);
-				this.port.off('data', this.handleSerialDataCallback);
-				this.port.off('close', this.handleSerialCloseCallback);
+				this.stopReceiver();
 				this.atc.stop();
-				this.buffer = Buffer.alloc(0);
 			break;
 
 			case BfcTransportMode.AT:
 				debug(`Mode: AT`);
-				this.port.off('data', this.handleSerialDataCallback);
-				this.port.off('close', this.handleSerialCloseCallback);
+				this.stopReceiver();
 				this.atc.start();
-				this.buffer = Buffer.alloc(0);
 			break;
 
 			case BfcTransportMode.BFC:
 				debug(`Mode: BFC`);
-				this.port.on('data', this.handleSerialDataCallback);
-				this.port.on('close', this.handleSerialCloseCallback);
 				this.atc.stop();
+				this.startReceiver();
 			break;
+		}
+	}
+
+	private startReceiver(): void {
+		const controller = new AbortController();
+		this.receiveController = controller;
+		void this.receive(controller);
+	}
+
+	private stopReceiver(): void {
+		this.receiveController?.abort();
+		this.receiveController = undefined;
+	}
+
+	private async receive(controller: AbortController): Promise<void> {
+		const header = Buffer.allocUnsafe(6);
+		const signal = controller.signal;
+		try {
+			while (!signal.aborted) {
+				await this.port.readExactInto(header, 0, header.length, 0, signal);
+
+				while ((header[0] ^ header[1] ^ header[2] ^ header[3] ^ header[4]) != header[5]) {
+					header.copyWithin(0, 1);
+					await this.port.readExactInto(header, 5, 1, 0, signal);
+				}
+
+				const payloadLength = header.readUInt16BE(2);
+				const packetLength = header.length + payloadLength + ((header[4] & BfcFrameFlags.CRC) ? 2 : 0);
+				const packet = Buffer.allocUnsafe(packetLength);
+				header.copy(packet);
+				await this.port.readExactInto(packet, header.length, packetLength - header.length, 0, signal);
+				void this.handleBfcPacket(packet);
+			}
+		} catch {
+			if (!signal.aborted && this.receiveController == controller)
+				this.handleSerialClose();
 		}
 	}
 
@@ -273,32 +302,6 @@ export class BFC extends BaseSerialProtocol {
 			void this.handleReceiverResponse(receiver.src, +dst, new Error(`BFC connection closed.`));
 		}
 		this.setTransportMode(BfcTransportMode.NONE);
-	}
-
-	private handleSerialData(data: Buffer): void {
-		this.buffer = Buffer.concat([this.buffer, data]);
-
-		while (this.buffer.length >= 6) {
-			let pktStart = findPacketStartInBuffer(this.buffer);
-			if (pktStart == null) {
-				this.buffer = this.buffer.subarray(this.buffer.length - 5); // trim noise
-				continue;
-			}
-
-			if (pktStart > 0) { // trim noise
-				this.buffer = this.buffer.subarray(pktStart);
-				pktStart = 0;
-			}
-
-			const pktLen = calcTotalPacketSize(this.buffer);
-			if (this.buffer.length < pktLen)
-				break;
-
-			const pkt = this.buffer.subarray(0, pktLen);
-			this.buffer = this.buffer.subarray(pktLen);
-
-			void this.handleBfcPacket(pkt);
-		}
 	}
 
 	private async handleBfcPacket(pkt: Buffer): Promise<void> {
@@ -752,27 +755,9 @@ export class BFC extends BaseSerialProtocol {
 	}
 }
 
-function findPacketStartInBuffer(buffer: Buffer): number | undefined {
-	let i = 0;
-	while (buffer.length - i >= 6) {
-		const chk = buffer[i] ^ buffer[i + 1] ^ buffer[i + 2] ^ buffer[i + 3] ^ buffer[i + 4];
-		if (chk == buffer[i + 5])
-			return i;
-		i++;
-	}
-	return undefined;
-}
-
 function checkPacketChecksum(pkt: Buffer): boolean {
 	const payloadLen = pkt.readUInt16BE(2);
 	const pktCRC = pkt.readUInt16BE(6 + payloadLen);
 	const realCRC = crc16(pkt, 0, payloadLen + 6);
 	return pktCRC == realCRC;
-}
-
-function calcTotalPacketSize(pkt: Buffer): number {
-	let len = pkt.readUInt16BE(2) + 6;
-	if ((pkt[4] & BfcFrameFlags.CRC))
-		len += 2;
-	return len;
 }

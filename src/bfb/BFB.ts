@@ -427,13 +427,11 @@ export class BfbCommandTimeoutError extends Error {
 
 export class BFB extends BaseSerialProtocol {
 	private mode = BfbTransportMode.NONE;
-	private buffer = Buffer.alloc(0);
 	private frames: BfbFrame[] = [];
 	private frameQueueChannel?: number;
 	private frameReceiver?: BfbFrameReceiver;
 	private readonly frameHandlers = new Map<string, BfbFrameHandler>();
-	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
-	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
+	private receiveController?: AbortController;
 	private readonly atc = new AtChannel(this.port);
 
 	private setTransportMode(mode: BfbTransportMode): void {
@@ -444,10 +442,8 @@ export class BFB extends BaseSerialProtocol {
 		switch (mode) {
 			case BfbTransportMode.NONE:
 				debug('Mode: NONE');
-				this.port.off('data', this.handleSerialDataCallback);
-				this.port.off('close', this.handleSerialCloseCallback);
+				this.stopReceiver();
 				this.atc.stop();
-				this.buffer = Buffer.alloc(0);
 				this.frames = [];
 				this.frameQueueChannel = undefined;
 				this.frameHandlers.clear();
@@ -455,10 +451,8 @@ export class BFB extends BaseSerialProtocol {
 
 			case BfbTransportMode.AT:
 				debug('Mode: AT');
-				this.port.off('data', this.handleSerialDataCallback);
-				this.port.off('close', this.handleSerialCloseCallback);
+				this.stopReceiver();
 				this.atc.start();
-				this.buffer = Buffer.alloc(0);
 				this.frames = [];
 				this.frameQueueChannel = undefined;
 			break;
@@ -466,9 +460,45 @@ export class BFB extends BaseSerialProtocol {
 			case BfbTransportMode.BFB:
 				debug('Mode: BFB');
 				this.atc.stop();
-				this.port.on('data', this.handleSerialDataCallback);
-				this.port.on('close', this.handleSerialCloseCallback);
+				this.startReceiver();
 			break;
+		}
+	}
+
+	private startReceiver(): void {
+		const controller = new AbortController();
+		this.receiveController = controller;
+		void this.receive(controller);
+	}
+
+	private stopReceiver(): void {
+		this.receiveController?.abort();
+		this.receiveController = undefined;
+	}
+
+	private async receive(controller: AbortController): Promise<void> {
+		const header = Buffer.allocUnsafe(3);
+		const signal = controller.signal;
+		try {
+			while (!signal.aborted) {
+				await this.port.readExactInto(header, 0, header.length, 0, signal);
+
+				while (header[2] != (header[0] ^ header[1]) || header[1] > BFB_MAX_PAYLOAD_SIZE) {
+					header.copyWithin(0, 1);
+					await this.port.readExactInto(header, 2, 1, 0, signal);
+				}
+
+				const frame: BfbFrame = { channel: header[0], data: Buffer.allocUnsafe(header[1]) };
+				await this.port.readExactInto(frame.data, 0, frame.data.length, 0, signal);
+				try {
+					this.handleBfbFrame(frame);
+				} catch (error) {
+					debug('BFB event callback failed: %O', error);
+				}
+			}
+		} catch {
+			if (!signal.aborted && this.receiveController == controller)
+				this.handleSerialClose();
 		}
 	}
 
@@ -548,27 +578,6 @@ export class BFB extends BaseSerialProtocol {
 			receiver.reject(new Error('BFB connection closed.'));
 		}
 		this.setTransportMode(BfbTransportMode.NONE);
-	}
-
-	private handleSerialData(data: Buffer): void {
-		this.buffer = Buffer.concat([this.buffer, data]);
-		while (this.buffer.length >= 3) {
-			const channel = this.buffer[0];
-			const length = this.buffer[1];
-			if (this.buffer[2] != (channel ^ length) || length > BFB_MAX_PAYLOAD_SIZE) {
-				this.buffer = this.buffer.subarray(1);
-				continue;
-			}
-			if (this.buffer.length < 3 + length)
-				break;
-			const frame = { channel, data: Buffer.from(this.buffer.subarray(3, 3 + length)) };
-			this.buffer = this.buffer.subarray(3 + length);
-			try {
-				this.handleBfbFrame(frame);
-			} catch (error) {
-				debug('BFB event callback failed: %O', error);
-			}
-		}
 	}
 
 	private handleBfbFrame(frame: BfbFrame): void {

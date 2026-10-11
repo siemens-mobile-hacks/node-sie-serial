@@ -116,7 +116,7 @@ fullflash has to stay byte-identical for other projects' tests.
   while the line is still busy. With it the EL71 and the S75 take 4 KiB writes
   ten times in a row; without it they die on the first one.
 * **The host baud rate is meaningless, but the guest's is not.** It is a TCP
-  chardev, so whatever `SerialPort` is opened with is ignored — but the firmware
+  chardev, so whatever `AsyncSerialPort` is opened with is ignored — but the firmware
   programs USART0 itself, and the emulator paces delivery to *that*: ~691 kbaud
   on the x75 phones.
 * **Every emulated phone loses a command every 30–40 s.** Pinged with `AT`

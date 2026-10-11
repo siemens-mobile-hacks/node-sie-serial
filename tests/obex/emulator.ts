@@ -1,7 +1,7 @@
 // Runs an emulated Siemens phone for the e2e tests.
 //
 // pmb887x-emu boots a real fullflash and exposes the phone's USART0 as a QEMU
-// TCP chardev, which serialport reaches through serialport-bindings-socket. The
+// TCP chardev, which AsyncSerialPort reaches through serialport-bindings-socket. The
 // firmware that answers on it is the phone's own, so the tests talk to a real
 // AT interpreter and a real FlexMem OBEX server - see tests/obex/README.md for what
 // the emulator can and cannot do.
@@ -13,8 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { SerialPortStream } from '@serialport/stream';
-import { SocketBinding, SocketBindingInterface } from 'serialport-bindings-socket';
+import { SocketBinding } from 'serialport-bindings-socket';
 import { AsyncSerialPort, PhonePlatform } from '../../src/index.js';
 import { PhoneTarget, RECONNECT_WAIT_MS, RunningTarget } from './target.js';
 
@@ -237,12 +236,11 @@ async function startPhone(phone: EmulatedPhone): Promise<RunningTarget> {
 
 		// The host baud rate is meaningless on a TCP chardev; the firmware pins
 		// USART0 at 115200 either way
-		const port = new AsyncSerialPort(new SerialPortStream<SocketBindingInterface>({
+		const port = new AsyncSerialPort({
 			binding: SocketBinding,
 			path: `tcp://127.0.0.1:${tcpPort}`,
 			baudRate: 115200,
-			autoOpen: false,
-		}));
+		});
 		await port.open();
 		return { port, log, stop };
 	} catch (e) {

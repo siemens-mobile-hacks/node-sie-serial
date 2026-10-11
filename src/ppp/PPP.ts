@@ -121,8 +121,7 @@ export class PPP extends BaseSerialProtocol {
 	private readonly packetHandlers = new Set<PppPacketHandler>();
 	private configuredAddress: Buffer | undefined;
 	private readonly icmp = new ICMP(this);
-	private readonly handleSerialDataCallback = this.handleSerialData.bind(this);
-	private readonly handleSerialCloseCallback = this.handleSerialClose.bind(this);
+	private receiveController?: AbortController;
 
 	private handleSerialClose() {
 		this.stop();
@@ -219,10 +218,11 @@ export class PPP extends BaseSerialProtocol {
 		this.packets = [];
 		this.configuredAddress = undefined;
 		this.running = true;
-		this.port.on('data', this.handleSerialDataCallback);
-		this.port.on('close', this.handleSerialCloseCallback);
 		if (initialData?.length)
 			this.handleSerialData(initialData);
+		const controller = new AbortController();
+		this.receiveController = controller;
+		void this.receive(controller);
 	}
 
 	stop() {
@@ -235,8 +235,8 @@ export class PPP extends BaseSerialProtocol {
 		this.chapUsername = undefined;
 		this.chapPassword = undefined;
 		this.chapChallengeIdentifier = undefined;
-		this.port.off('data', this.handleSerialDataCallback);
-		this.port.off('close', this.handleSerialCloseCallback);
+		this.receiveController?.abort();
+		this.receiveController = undefined;
 		this.frame = [];
 		this.packets = [];
 		this.packetHandlers.clear();
@@ -246,6 +246,21 @@ export class PPP extends BaseSerialProtocol {
 			this.waiter = undefined;
 			clearTimeout(waiter.timer);
 			waiter.resolve(undefined);
+		}
+	}
+
+	private async receive(controller: AbortController): Promise<void> {
+		try {
+			while (!controller.signal.aborted) {
+				const data = await this.port.readNextChunk(controller.signal);
+				if (controller.signal.aborted)
+					break;
+				if (data)
+					this.handleSerialData(data);
+			}
+		} catch {
+			if (!controller.signal.aborted && this.receiveController == controller)
+				this.handleSerialClose();
 		}
 	}
 

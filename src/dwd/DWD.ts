@@ -477,9 +477,7 @@ export class DWD extends BaseSerialProtocol {
 		if (expectedResponseLength == -1) {
 			return Buffer.alloc(0);
 		} else if (expectedResponseLength == 0) {
-			const frameHeader = await this.port.read(4, timeout);
-			if (!frameHeader)
-				throw new DWDTimeoutError("DWD command timeout! (header)");
+			const frameHeader = await this.port.readExact(4, timeout);
 
 			const receivedResponseFrameId = frameHeader.readUInt16LE(0);
 			if (receivedResponseFrameId != responseFrameId) {
@@ -489,9 +487,7 @@ export class DWD extends BaseSerialProtocol {
 			}
 
 			const expectedResponseLength = frameHeader.readUInt16LE(2);
-			const frameBody = await this.port.read(expectedResponseLength, timeout);
-			if (!frameBody)
-				throw new DWDTimeoutError("DWD command (%04X) timeout! (body)", requestFrameId);
+			const frameBody = await this.port.readExact(expectedResponseLength, timeout);
 
 			debugTrx.enabled && debugTrx(sprintf(`[RX] %s %s`, hexdump(frameHeader), hexdump(frameBody)));
 			if (frameBody.length != expectedResponseLength) {
@@ -501,9 +497,7 @@ export class DWD extends BaseSerialProtocol {
 
 			return Buffer.concat([frameHeader, frameBody]);
 		} else {
-			const response = await this.port.read(expectedResponseLength, timeout);
-			if (!response)
-				throw new DWDTimeoutError("DWD command (%04X) timeout! (body)", requestFrameId);
+			const response = await this.port.readExact(expectedResponseLength, timeout);
 			debugTrx.enabled && debugTrx(sprintf(`[RX] %s`, hexdump(response)));
 
 			const receivedResponseFrameId = response.readUInt16LE(0);
