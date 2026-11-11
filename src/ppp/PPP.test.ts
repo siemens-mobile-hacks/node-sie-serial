@@ -1,11 +1,14 @@
+import { once } from 'node:events';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { openPort } from '../../examples/utils.js';
 import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
 import { AtChannel, type AtCommandResponse } from '#src/at/AtChannel.js';
 import { delay } from '#src/utils.js';
+import { DNS, encodeDnsQuery } from './DNS.js';
 import { ICMP } from './ICMP.js';
 import { PPP, PppProtocol, type PppConnectionInfo, type PppPingResult } from './PPP.js';
 import { TCP } from './TCP.js';
+import { TcpSocket } from './TcpSocket.js';
 import { UDP } from './UDP.js';
 
 const PORT_PATH = process.env.PPP_PORT ?? '/dev/ttyUSB0';
@@ -14,6 +17,7 @@ const USERNAME = process.env.PPP_USERNAME ?? '';
 const PASSWORD = process.env.PPP_PASSWORD ?? '';
 const TARGET = process.env.PPP_TARGET ?? '8.8.8.8';
 const DNS_TARGET = process.env.PPP_DNS_TARGET ?? '8.8.8.8';
+const DNS_HOSTNAME = process.env.PPP_DNS_HOSTNAME ?? 'example.com';
 const TCP_TARGET = process.env.PPP_TCP_TARGET ?? '1.1.1.1';
 const TCP_PORT = Number(process.env.PPP_TCP_PORT ?? 80);
 const DIAL_COMMAND = process.env.PPP_DIAL ?? 'ATDT*99***1#';
@@ -122,7 +126,7 @@ describeHardware('PPP hardware', () => {
 		if (!ppp)
 			throw new Error('PPP was not initialized.');
 		const udp = new UDP(ppp);
-		const query = dnsQuery();
+		const query = encodeDnsQuery(Math.floor(Math.random() * 0x10000), DNS_HOSTNAME);
 		let timer: NodeJS.Timeout | undefined;
 		try {
 			const response = new Promise<Buffer>((resolve, reject) => {
@@ -140,6 +144,15 @@ describeHardware('PPP hardware', () => {
 			clearTimeout(timer);
 			udp.close();
 		}
+	}, 15000);
+
+	test('resolves a hostname through DNS', async () => {
+		if (!ppp)
+			throw new Error('PPP was not initialized.');
+		const addresses = await new DNS(ppp).resolveIpv4(DNS_HOSTNAME, DNS_TARGET, 10000);
+		expect(addresses.length).toBeGreaterThan(0);
+		for (const address of addresses)
+			expect(address).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
 	}, 15000);
 
 	test('opens a TCP connection and exchanges data', async () => {
@@ -171,16 +184,26 @@ describeHardware('PPP hardware', () => {
 			await tcp.close();
 		}
 	}, 35000);
-});
 
-function dnsQuery(): Buffer {
-	const id = Math.floor(Math.random() * 0x10000);
-	return Buffer.from([
-		id >> 8, id & 0xFF, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 7, ...Buffer.from('example'), 3,
-		...Buffer.from('com'), 0, 0, 1, 0, 1,
-	]);
-}
+	test('exchanges data through TcpSocket until the peer closes', async () => {
+		if (!ppp)
+			throw new Error('PPP was not initialized.');
+		const socket = new TcpSocket(ppp);
+		try {
+			await socket.connect(TCP_TARGET, TCP_PORT, 15000);
+			const chunks: Buffer[] = [];
+			socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+			const closed = once(socket, 'close', { signal: AbortSignal.timeout(20000) });
+			socket.write('GET / HTTP/1.0\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n');
+			await closed;
+			expect(Buffer.concat(chunks).toString()).toMatch(/^HTTP\/1\.[01] /);
+			expect(socket.readableEnded).toBe(true);
+			expect(socket.writableFinished).toBe(true);
+		} finally {
+			socket.destroy();
+		}
+	}, 40000);
+});
 
 async function waitForAttach(atc: AtChannel, attached: boolean, timeout: number): Promise<boolean> {
 	const deadline = Date.now() + timeout;

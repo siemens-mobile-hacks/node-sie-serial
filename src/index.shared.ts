@@ -4,6 +4,7 @@ export * from './ppp/ICMP.js';
 export * from './ppp/IPv4.js';
 export * from './ppp/TCP.js';
 export * from './ppp/UDP.js';
+export * from './ppp/DNS.js';
 export * from './bfc/BFC.js';
 export * from './bfb/BFB.js';
 export * from './cgsn/CGSN.js';

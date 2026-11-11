@@ -39,6 +39,7 @@ type CloseWaiter = {
 };
 
 export type TcpDataHandler = (data: Buffer) => void;
+export type TcpEndHandler = (error?: Error) => void;
 
 export class TCP {
 	readonly localPort: number;
@@ -54,6 +55,7 @@ export class TCP {
 	private closing = false;
 	private sending = false;
 	private readonly handlers = new Set<TcpDataHandler>();
+	private readonly endHandlers = new Set<TcpEndHandler>();
 	private readonly segments: TcpSegment[] = [];
 	private segmentWaiter: SegmentWaiter | undefined;
 	private ackWaiter: AckWaiter | undefined;
@@ -73,6 +75,13 @@ export class TCP {
 			throw new Error('TCP socket is closed.');
 		this.handlers.add(callback);
 		return () => this.handlers.delete(callback);
+	}
+
+	onEnd(callback: TcpEndHandler): () => void {
+		if (this.closed)
+			throw new Error('TCP socket is closed.');
+		this.endHandlers.add(callback);
+		return () => this.endHandlers.delete(callback);
 	}
 
 	async connect(address: string, port: number, timeout = 10000): Promise<void> {
@@ -161,6 +170,7 @@ export class TCP {
 		this.connected = false;
 		this.unsubscribe();
 		this.handlers.clear();
+		this.endHandlers.clear();
 		const error = new Error('TCP socket is closed.');
 		if (this.segmentWaiter) {
 			clearTimeout(this.segmentWaiter.timer);
@@ -256,8 +266,10 @@ export class TCP {
 
 	private handleConnectedSegment(segment: TcpSegment): void {
 		if ((segment.flags & TCP_RST) != 0) {
-			this.ackWaiter?.reject(new Error('TCP connection was reset by the peer.'));
+			const error = new Error('TCP connection was reset by the peer.');
+			this.ackWaiter?.reject(error);
 			this.ackWaiter = undefined;
+			this.notifyEnd(error);
 			this.destroy();
 			return;
 		}
@@ -290,9 +302,20 @@ export class TCP {
 				clearTimeout(waiter.timer);
 				waiter.resolve();
 			}
+			this.notifyEnd();
 		}
 		if (segment.payload.length > 0 || (segment.flags & TCP_FIN) != 0)
 			void this.sendSegment(TCP_ACK, Buffer.alloc(0)).catch((error: unknown) => debug('TCP ACK failed: %O', error));
+	}
+
+	private notifyEnd(error?: Error): void {
+		for (const callback of this.endHandlers) {
+			try {
+				callback(error);
+			} catch (callbackError) {
+				debug('TCP end callback failed: %O', callbackError);
+			}
+		}
 	}
 
 	private nextSegment(timeout: number): Promise<TcpSegment> {

@@ -479,11 +479,6 @@ export class PPP extends BaseSerialProtocol {
 		while (!localOpened || !peerOpened) {
 			const packet = await this.nextPacketUntil(deadline, retryInterval);
 			if (!packet) {
-				const compatibleOptions = removeIpcpDnsOptions(requestOptions);
-				if (compatibleOptions.length != requestOptions.length) {
-					requestOptions = compatibleOptions;
-					request = this.createControlPacket(PppControlCode.CONFIGURE_REQUEST, requestOptions);
-				}
 				await this.send(PppProtocol.IPCP, request);
 				continue;
 			}
@@ -808,11 +803,6 @@ function ipcpOptions(): Buffer {
 		IpcpOption.PRIMARY_DNS, 6, 0, 0, 0, 0,
 		IpcpOption.SECONDARY_DNS, 6, 0, 0, 0, 0,
 	]);
-}
-
-function removeIpcpDnsOptions(options: Buffer): Buffer {
-	return Buffer.concat(splitOptions(options).filter((option) =>
-		option[0] != IpcpOption.PRIMARY_DNS && option[0] != IpcpOption.SECONDARY_DNS));
 }
 
 function rejectIpcpOptions(data: Buffer): Buffer {
