@@ -33,6 +33,8 @@ enum FrameType {
 	WRITE_MEMORY_REQ = 0x78,
 	WRITE_MEMORY_RESP = 0x79,
 	SW_RESET_REQ = 0xAD,
+	SET_POWER_DOWN_MODE_REQ = 0x1C6,
+	SET_POWER_DOWN_MODE_RESP = 0x1C7,
 	GET_SW_VERSION_REQ = 0x54,
 	GET_SW_VERSION_RESP = 0x55,
 }
@@ -77,6 +79,8 @@ const FRAME_SIZE = {
 	[FrameType.WRITE_MEMORY_REQ]: 8,
 	[FrameType.WRITE_MEMORY_RESP]: 4,
 	[FrameType.SW_RESET_REQ]: 2,
+	[FrameType.SET_POWER_DOWN_MODE_REQ]: 8,
+	[FrameType.SET_POWER_DOWN_MODE_RESP]: 0,
 	[FrameType.GET_SW_VERSION_REQ]: 2,
 	[FrameType.GET_SW_VERSION_RESP]: 0,
 };
@@ -301,9 +305,20 @@ export class DWD extends BaseSerialProtocol {
 		await this.execCommand(request, FrameType.WRITE_MEMORY_RESP);
 	}
 
-	async poweroff(): Promise<void> {
+	async reset(): Promise<void> {
 		const request = this.newRequest(FrameType.SW_RESET_REQ);
 		await this.execCommand(request, FrameType.NO_RESP);
+	}
+
+	async poweroff(): Promise<void> {
+		await this.reset();
+	}
+
+	async setPowerDownMode(mode: number, value: number): Promise<void> {
+		const request = this.newRequest(FrameType.SET_POWER_DOWN_MODE_REQ);
+		request.writeUInt16LE(mode, 2);
+		request.writeUInt32LE(value, 4);
+		await this.execCommand(request, FrameType.SET_POWER_DOWN_MODE_RESP);
 	}
 
 	async bruteforceKey2(options: BruteforceKey2Options = {}): Promise<number[]> {
