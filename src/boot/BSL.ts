@@ -2,8 +2,8 @@ import createDebug from 'debug';
 import { AsyncSerialPort } from '#src/AsyncSerialPort.js';
 import { sprintf } from "sprintf-js";
 
-const IGNITION_ON_PERIOD = 50;
-const IGNITION_OFF_PERIOD = 150;
+const IGNITION_ON_PERIOD = 500;
+const IGNITION_OFF_PERIOD = 250;
 
 const CPU_NAMES: Record<number, string> = {
 	0xB0:	'PMB8875 (SGold)',
@@ -43,6 +43,7 @@ type LoadBootCodeResultError = {
 export type LoadBootCodeResult = (LoadBootCodeResultOk | LoadBootCodeResultError) & {
 	status: BSLStatus;
 	cpu: string;
+	secureBoot: boolean;
 };
 
 export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options: LoadBootCodeOptions = {}): Promise<LoadBootCodeResult> {
@@ -53,34 +54,33 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 	};
 
 	await port.update({ baudRate: 115200 });
+	await port.setSignals({ dtr: options.autoIgnitionInvertPolarity, rts: false });
 
 	let cpuType = 0;
 	let lastDtr = false;
-	let lastIgnition = 0;
+	let pulses = 0;
+	const started = Date.now();
+	let nextIgnition = started;
 
 	debug("Sending ping (AT)...");
 	debug("Please, short press red button!");
 
 	while (!options.signal?.aborted) {
-		if (options.autoIgnition) {
-			const ignitionTimeout = lastDtr ? IGNITION_ON_PERIOD : IGNITION_OFF_PERIOD;
-			if ((Date.now() - lastIgnition) >= ignitionTimeout) {
-				lastDtr = !lastDtr;
-				if (options.autoIgnitionInvertPolarity) {
-					await port.setSignals({ dtr: !lastDtr });
-				} else {
-					await port.setSignals({ dtr: lastDtr });
-				}
-				lastIgnition = Date.now();
-			}
+		const now = Date.now();
+		if (options.autoIgnition && now >= nextIgnition) {
+			lastDtr = !lastDtr;
+			await port.setSignals({ dtr: options.autoIgnitionInvertPolarity ? !lastDtr : lastDtr });
+			if (lastDtr)
+				pulses++;
+			nextIgnition = now + (lastDtr ? IGNITION_ON_PERIOD : IGNITION_OFF_PERIOD);
 		}
 
 		await port.write("AT");
 
 		const response = await port.readByte(5);
-		if (response != -1 && (response == 0xB0 || response == 0xC0)) {
-			cpuType = response;
-			debug(`Detected CPU: ${CPU_NAMES[cpuType]}`);
+		if (response != -1 && CPU_TYPES[response & 0xF0]) {
+			cpuType = response & 0xF0;
+			debug(`Detected CPU: ${CPU_NAMES[cpuType]} (ignition pulses: ${pulses}, ${Date.now() - started} ms)`);
 			break;
 		}
 
@@ -88,24 +88,32 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 			debug(sprintf("Unexpected response: %02X", response));
 	}
 
-	await port.setSignals({ dtr: options.autoIgnitionInvertPolarity });
+	if (options.autoIgnition)
+		await port.setSignals({ dtr: options.autoIgnitionInvertPolarity });
 
 	const cpu = CPU_TYPES[cpuType];
 	let status: BSLStatus;
 	let error: string | undefined;
+	const secureBoot = !options.signal?.aborted && await port.readByte(5) == 0xC4;
+
+	if (secureBoot)
+		debug("Secure boot detected.");
 
 	if (options.signal?.aborted) {
 		error = "Aborted by user.";
 		status = BSLStatus.ABORTED;
+	} else if (secureBoot && await port.readByte(5) == -1) {
+		error = "Timeout, secure boot chip ID not received.";
+		status = BSLStatus.TIMEOUT;
 	} else {
 		await port.write(genPayload(code));
 
 		debug(`Sending EBL code (${code.length} bytes)...`);
-		const response = await port.readByte(1000);
+		const response = await port.readByte(2000);
 		if (response == -1) {
 			error = "Timeout, ACK not received.";
 			status = BSLStatus.TIMEOUT;
-		} else if (response == 0xC1 || response == 0xB1) {
+		} else if (response == 0x01 || response == 0xC1 || response == 0xB1) {
 			status = BSLStatus.SUCCESS;
 		} else if (response == 0x1C || response == 0x1B) {
 			error = "EBL code is denied by bootloader.";
@@ -118,10 +126,10 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 
 	if (status == BSLStatus.SUCCESS) {
 		debug("ACK received, EBL successfully loaded.");
-		return { success: true, status, cpu };
+		return { success: true, status, cpu, secureBoot };
 	} else {
 		debug(`ERROR: ${error}`);
-		return { success: false, error: error!, status, cpu };
+		return { success: false, error: error!, status, cpu, secureBoot };
 	}
 }
 
