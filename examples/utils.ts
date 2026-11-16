@@ -1,5 +1,5 @@
 import { AsyncSerialPort } from '@sie-js/serial';
-import { autoDetect } from '@sie-js/node-serialport-bindings-cpp';
+import { autoDetect } from 'serialport-rs';
 import { SocketBinding } from 'serialport-bindings-socket';
 
 export async function openPort(path: string, baudRate: number): Promise<AsyncSerialPort> {

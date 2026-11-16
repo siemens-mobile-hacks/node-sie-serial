@@ -1,9 +1,5 @@
 packages:
   - .
 
-patchedDependencies:
-  '@serialport/bindings-interface': patches/@serialport__bindings-interface.patch
-
 allowBuilds:
-  '@sie-js/node-serialport-bindings-cpp': true
   esbuild: true

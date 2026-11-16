@@ -1,4 +1,4 @@
-import { autoDetect } from '@sie-js/node-serialport-bindings-cpp';
+import { autoDetect } from 'serialport-rs';
 import type { BindingInterface, BindingPortInterface, OpenOptions } from '@serialport/bindings-interface';
 import {
 	AsyncSerialPort as BaseAsyncSerialPort,
