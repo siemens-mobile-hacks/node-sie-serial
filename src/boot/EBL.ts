@@ -1,6 +1,6 @@
 import { sprintf } from "sprintf-js";
 import createDebug from "debug";
-import { loadBootCode, LoadBootCodeOptions } from './BSL.js';
+import { loadBootCode, BSLOptions } from './BSL.js';
 import { decodeCString, hexdump } from '#src/utils.js';
 import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
@@ -50,8 +50,8 @@ export class EBL extends BaseSerialProtocol {
 		return BAUDRATES;
 	}
 
-	async connect(options: LoadBootCodeOptions = {}): Promise<void> {
-		const bootStatus = await loadBootCode(this.port, Buffer.from([0x00F020E3, 0xFDFFFFEA]), options);
+	async connect(options: BSLOptions = {}): Promise<void> {
+		const bootStatus = await loadBootCode(this.port, () => Buffer.from([0x00F020E3, 0xFDFFFFEA]), options);
 		if (!bootStatus.success)
 			throw new EBLError(bootStatus.error);
 

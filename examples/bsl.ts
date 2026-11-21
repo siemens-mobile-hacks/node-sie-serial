@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { parseArgs } from 'node:util';
-import { loadBootCode } from '@sie-js/serial';
+import { BSLStage, loadBootCode } from '@sie-js/serial';
 import { openPort } from "./utils.js";
 
 const SPECIAL_BOOTS: Record<string, Buffer> = {
@@ -75,7 +75,12 @@ if ((argv.boot in SPECIAL_BOOTS)) {
 const port = await openPort(argv.port, 115200);
 await port.open();
 
-const result = await loadBootCode(port, bootCode);
+const result = await loadBootCode(port, (info) => {
+	console.log(`CPU: ${info.cpu}, secure boot: ${info.secureBoot}`);
+	return bootCode;
+}, {
+	onProgress: (stage) => console.log(`Stage: ${BSLStage[stage]}`),
+});
 console.log(result);
 
 while (true) {

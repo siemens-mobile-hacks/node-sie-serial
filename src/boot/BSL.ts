@@ -8,11 +8,15 @@ const IGNITION_OFF_PERIOD = 250;
 const CPU_NAMES: Record<number, string> = {
 	0xB0:	'PMB8875 (SGold)',
 	0xC0:	'PMB8876 (SGold2)',
+	0xD0:	'PMB8877 (SGold3)',
 };
 
-const CPU_TYPES: Record<number, string> = {
-	0xB0:	'sgold',
-	0xC0:	'sgold2',
+export type BSLCpu = 'pmb8875' | 'pmb8876' | 'pmb8877' | 'pmb887x';
+
+const CPU_TYPES: Record<number, BSLCpu> = {
+	0xB0:	'pmb8875',
+	0xC0:	'pmb8876',
+	0xD0:	'pmb8877',
 };
 
 const debug = createDebug("bsl");
@@ -22,31 +26,48 @@ export enum BSLStatus {
 	TIMEOUT,
 	DENIED,
 	UNKNOWN,
-	ABORTED
+	ABORTED,
+	DWD_BOOTLOADER
 }
 
-export type LoadBootCodeOptions = {
-	autoIgnition?: boolean;
-	autoIgnitionInvertPolarity?: boolean;
-	signal?: AbortSignal | null;
-};
+export enum BSLStage {
+	CONNECT,
+	UPLOAD,
+	WAIT_ACK,
+	ABORTED,
+	DONE
+}
 
-type LoadBootCodeResultOk = {
-	success: true;
-};
-
-type LoadBootCodeResultError = {
-	success: false;
-	error: string;
-};
-
-export type LoadBootCodeResult = (LoadBootCodeResultOk | LoadBootCodeResultError) & {
-	status: BSLStatus;
-	cpu: string;
+export type BSLBootInfo = {
+	cpu: BSLCpu;
 	secureBoot: boolean;
 };
 
-export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options: LoadBootCodeOptions = {}): Promise<LoadBootCodeResult> {
+export type BSLBootCodeProvider = (info: BSLBootInfo) => Buffer | Promise<Buffer>;
+
+export type BSLOptions = {
+	autoIgnition?: boolean;
+	autoIgnitionInvertPolarity?: boolean;
+	onProgress?: (stage: BSLStage) => void;
+	signal?: AbortSignal;
+};
+
+type BSLResultOk = BSLBootInfo & {
+	success: true;
+};
+
+type BSLResultError = {
+	success: false;
+	error: string;
+	cpu?: BSLCpu;
+	secureBoot: boolean;
+};
+
+export type BSLResult = (BSLResultOk | BSLResultError) & {
+	status: BSLStatus;
+};
+
+export async function loadBootCode(port: AsyncSerialPort, code?: BSLBootCodeProvider, options: BSLOptions = {}): Promise<BSLResult> {
 	options = {
 		autoIgnition: true,
 		autoIgnitionInvertPolarity: false,
@@ -62,6 +83,7 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 	const started = Date.now();
 	let nextIgnition = started;
 
+	options.onProgress?.(BSLStage.CONNECT);
 	debug("Sending ping (AT)...");
 	debug("Please, short press red button!");
 
@@ -77,11 +99,22 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 
 		await port.write("AT");
 
-		const response = await port.readByte(5);
+		const response = await port.readByte(5, options.signal);
 		if (response != -1 && CPU_TYPES[response & 0xF0]) {
 			cpuType = response & 0xF0;
 			debug(`Detected CPU: ${CPU_NAMES[cpuType]} (ignition pulses: ${pulses}, ${Date.now() - started} ms)`);
 			break;
+		}
+
+		if (response == 0x0B) {
+			debug(`Detected DWD bootloader (ignition pulses: ${pulses}, ${Date.now() - started} ms)`);
+			options.onProgress?.(BSLStage.DONE);
+			return {
+				success: true,
+				status: BSLStatus.DWD_BOOTLOADER,
+				secureBoot: true,
+				cpu: "pmb887x", // unknown at this moment
+			};
 		}
 
 		if (response != -1)
@@ -91,29 +124,43 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 	if (options.autoIgnition)
 		await port.setSignals({ dtr: options.autoIgnitionInvertPolarity });
 
-	const cpu = CPU_TYPES[cpuType];
 	let status: BSLStatus;
 	let error: string | undefined;
-	const secureBoot = !options.signal?.aborted && await port.readByte(5) == 0xC4;
+	const cpu = CPU_TYPES[cpuType];
 
-	if (secureBoot)
-		debug("Secure boot detected.");
+	// Check for secure BSL
+	const secureBootHello = await port.read(2, 5, options.signal);
+	const secureBoot = secureBootHello?.length == 2 && secureBootHello.readUint8(0) == (cpuType | 0x04);
+
+	if (secureBoot) {
+		debug(`Secure boot detected (${secureBootHello.toString('hex').toUpperCase()}).`);
+	}
 
 	if (options.signal?.aborted) {
 		error = "Aborted by user.";
 		status = BSLStatus.ABORTED;
-	} else if (secureBoot && await port.readByte(5) == -1) {
-		error = "Timeout, secure boot chip ID not received.";
-		status = BSLStatus.TIMEOUT;
+	} else if (!code) {
+		status = BSLStatus.SUCCESS;
 	} else {
-		await port.write(genPayload(code));
+		const bootCode = await code({ cpu, secureBoot });
+		const payload = genPayload(bootCode);
 
-		debug(`Sending EBL code (${code.length} bytes)...`);
-		const response = await port.readByte(2000);
-		if (response == -1) {
+		if (!options.signal?.aborted) {
+			debug(`Sending EBL code (${bootCode.length} bytes)...`);
+			options.onProgress?.(BSLStage.UPLOAD);
+			await port.write(payload);
+			options.onProgress?.(BSLStage.WAIT_ACK);
+		}
+
+		const response = await port.readByte(2000, options.signal ?? undefined);
+		if (options.signal?.aborted) {
+			error = "Aborted by user.";
+			status = BSLStatus.ABORTED;
+		} else if (response == -1) {
 			error = "Timeout, ACK not received.";
 			status = BSLStatus.TIMEOUT;
 		} else if (response == 0x01 || response == 0xC1 || response == 0xB1) {
+			debug("ACK received, EBL successfully loaded.");
 			status = BSLStatus.SUCCESS;
 		} else if (response == 0x1C || response == 0x1B) {
 			error = "EBL code is denied by bootloader.";
@@ -124,8 +171,9 @@ export async function loadBootCode(port: AsyncSerialPort, code: Buffer, options:
 		}
 	}
 
+	options.onProgress?.(status == BSLStatus.ABORTED ? BSLStage.ABORTED : BSLStage.DONE);
+
 	if (status == BSLStatus.SUCCESS) {
-		debug("ACK received, EBL successfully loaded.");
 		return { success: true, status, cpu, secureBoot };
 	} else {
 		debug(`ERROR: ${error}`);

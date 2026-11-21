@@ -1,5 +1,5 @@
 import createDebug from 'debug';
-import { loadBootCode, LoadBootCodeOptions } from './BSL.js';
+import { loadBootCode, BSLOptions } from './BSL.js';
 import { sprintf } from 'sprintf-js';
 import { decodeCString } from '#src/utils.js';
 import { CHAOS_BOOT_CODE } from "./chaos.bin.js";
@@ -92,8 +92,8 @@ export class ChaosLoader extends BaseSerialProtocol {
 		return Object.keys(BAUDRATES).map(parseInt);
 	}
 
-	async connect(options: LoadBootCodeOptions = {}): Promise<void> {
-		const bootStatus = await loadBootCode(this.port, CHAOS_BOOT_CODE, options);
+	async connect(options: BSLOptions = {}): Promise<void> {
+		const bootStatus = await loadBootCode(this.port, () => CHAOS_BOOT_CODE, options);
 		if (!bootStatus.success)
 			throw new ChaosLoaderError(bootStatus.error);
 
