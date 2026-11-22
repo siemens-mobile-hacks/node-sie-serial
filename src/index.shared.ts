@@ -10,7 +10,7 @@ export * from './bfb/BFB.js';
 export * from './cgsn/CGSN.js';
 export * from './boot/BSL.js';
 export * from './dwd/DWD.js';
-export * from './boot/EBL.js';
+export * from './ebl/EBL.js';
 export * from './obex/OBEX.js';
 export * from './boot/ChaosLoader.js';
 export * from './io.js';

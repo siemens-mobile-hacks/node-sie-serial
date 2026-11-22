@@ -1,6 +1,6 @@
 import { sprintf } from "sprintf-js";
 import createDebug from "debug";
-import { loadBootCode, BSLCpu, BSLOptions } from './BSL.js';
+import { loadBootCode, BSLCpu, BSLOptions } from '#src/boot/BSL.js';
 import { decodeCString, hexdump } from '#src/utils.js';
 import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
@@ -57,9 +57,9 @@ type EBLPacket = {
 
 async function loadEBLCode(): Promise<(cpu: BSLCpu) => Buffer> {
 	const [{ EBL_SGOLD1 }, { EBL_SGOLD2 }, { EBL_SGOLD3 }] = await Promise.all([
-		import('#src/ebl/ebl_sgold1.bin.js'),
-		import('#src/ebl/ebl_sgold2.bin.js'),
-		import('#src/ebl/ebl_sgold3.bin.js'),
+		import('./ebl_sgold1.bin.js'),
+		import('./ebl_sgold2.bin.js'),
+		import('./ebl_sgold3.bin.js'),
 	]);
 	return (cpu) => {
 		switch (cpu) {
