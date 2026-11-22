@@ -12,7 +12,14 @@ const DEFAULT_HIGH_WATER_MARK = 64 * 1024;
 export type AsyncSerialPortOptions<TOptions extends OpenOptions = OpenOptions> = TOptions & {
 	binding: BindingInterface<BindingPortInterface, TOptions>;
 	highWaterMark?: number;
+	strictModemSignals?: boolean;
 };
+
+// A pty has no modem control lines and fails with ENOTTY.
+// FIXME: serialport-rs loses errno, so ENOTTY is only recognizable by the nix errno text.
+function hasNoModemLines(error: unknown): boolean {
+	return (error as Error).message == 'Not a typewriter';
+}
 
 export class SerialReadTimeoutError extends Error {
 	constructor() {
@@ -24,6 +31,7 @@ export class SerialReadTimeoutError extends Error {
 export class AsyncSerialPort<TOptions extends OpenOptions = OpenOptions> {
 	private readonly binding: BindingInterface<BindingPortInterface, TOptions>;
 	private readonly openOptions: TOptions;
+	private readonly strictModemSignals: boolean;
 	private port?: BindingPortInterface;
 	private opening?: Promise<void>;
 	private readError?: unknown;
@@ -37,13 +45,15 @@ export class AsyncSerialPort<TOptions extends OpenOptions = OpenOptions> {
 	private writeQueueTail: Promise<void> = Promise.resolve();
 
 	constructor(options: AsyncSerialPortOptions<TOptions>) {
-		const { binding, highWaterMark = DEFAULT_HIGH_WATER_MARK } = options;
+		const { binding, highWaterMark = DEFAULT_HIGH_WATER_MARK, strictModemSignals = false } = options;
 		if (!Number.isSafeInteger(highWaterMark) || highWaterMark < 1)
 			throw new RangeError('High water mark must be a positive safe integer.');
 		this.binding = binding;
+		this.strictModemSignals = strictModemSignals;
 		this.openOptions = { ...options };
 		Reflect.deleteProperty(this.openOptions, 'binding');
 		Reflect.deleteProperty(this.openOptions, 'highWaterMark');
+		Reflect.deleteProperty(this.openOptions, 'strictModemSignals');
 		this.readBuffer = Buffer.allocUnsafe(highWaterMark);
 	}
 
@@ -263,11 +273,22 @@ export class AsyncSerialPort<TOptions extends OpenOptions = OpenOptions> {
 	}
 
 	async getSignals(): Promise<PortStatus> {
-		return this.getOpenPort().get();
+		try {
+			return await this.getOpenPort().get();
+		} catch (error) {
+			if (this.strictModemSignals || !hasNoModemLines(error))
+				throw error;
+			return { cts: false, dsr: false, dcd: false };
+		}
 	}
 
 	async setSignals(signals: SetOptions): Promise<void> {
-		await this.getOpenPort().set(signals);
+		try {
+			await this.getOpenPort().set(signals);
+		} catch (error) {
+			if (this.strictModemSignals || !hasNoModemLines(error))
+				throw error;
+		}
 	}
 
 	async update(settings: UpdateOptions): Promise<void> {
