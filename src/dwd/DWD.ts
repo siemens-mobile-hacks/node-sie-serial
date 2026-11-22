@@ -114,7 +114,7 @@ export const DWD_KEYS: Record<string, DWDKeys> = {
 
 export class DWDError extends Error {
 	constructor(message: string, ...args: any[]) {
-		const errorMessage = sprintf(message, args);
+		const errorMessage = sprintf(message, ...args);
 		debug(errorMessage);
 		super(errorMessage);
 	}

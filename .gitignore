@@ -2,6 +2,7 @@ AGENTS.md
 .shit
 .idea
 *.bin
+!firmware/*.bin
 *.data
 
 # Logs

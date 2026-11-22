@@ -1,6 +1,6 @@
 import { sprintf } from "sprintf-js";
 import createDebug from "debug";
-import { loadBootCode, BSLOptions } from './BSL.js';
+import { loadBootCode, BSLCpu, BSLOptions } from './BSL.js';
 import { decodeCString, hexdump } from '#src/utils.js';
 import { BaseSerialProtocol } from '#src/BaseSerialProtocol.js';
 
@@ -9,15 +9,25 @@ const debug = createDebug('ebl');
 enum CMD {
 	SET_EBU_CONFIG	= 0x801,
 	SET_BAUDRATE	= 0x82,
+	BAD_BAUDRATE	= 0x83,
 	CFI_STAGE1		= 0x84,
 	CFI_STAGE2		= 0x85,
+	STOP_TIMEOUT	= 0x102,
+	IMAGE_HEADER	= 0x204,
+	VERIFY_IMAGE	= 0x205,
+	SET_ADDRESS		= 0x802,
+	READ			= 0x803,
+	WRITE			= 0x804,
+	ERASE			= 0x805,
+	ERASE_STATUS	= 0x806,
+	FILL			= 0x808,
 }
 
 const BAUDRATES = [115200, 230400, 460800, 921600];
 
 export class EBLError extends Error {
 	constructor(message: string, ...args: any[]) {
-		const errorMessage = sprintf(message, args);
+		const errorMessage = sprintf(message, ...args);
 		debug(errorMessage);
 		super(errorMessage);
 	}
@@ -30,18 +40,40 @@ export type EBLInfo = {
 	name: string;
 };
 
-type EBUFlashConfig = {
-	cs: number;
-	addrsel: number;
-	buscon: number;
-	busap: number;
+export type EBLConnectOptions = BSLOptions & {
+	skipBSL?: boolean;
 };
 
-type EBUFLashInfo = {
-	valid: boolean;
-	vid: number;
-	pid: number;
+export type EBLEraseStatus = {
+	idle: boolean;
+	nextAddress: number;
+	raw: Buffer;
 };
+
+type EBLPacket = {
+	cmd: number;
+	payload: Buffer;
+};
+
+async function loadEBLCode(): Promise<(cpu: BSLCpu) => Buffer> {
+	const [{ EBL_SGOLD1 }, { EBL_SGOLD2 }, { EBL_SGOLD3 }] = await Promise.all([
+		import('#src/ebl/ebl_sgold1.bin.js'),
+		import('#src/ebl/ebl_sgold2.bin.js'),
+		import('#src/ebl/ebl_sgold3.bin.js'),
+	]);
+	return (cpu) => {
+		switch (cpu) {
+			case 'pmb8875':
+				return EBL_SGOLD1;
+			case 'pmb8876':
+				return EBL_SGOLD2;
+			case 'pmb8877':
+				return EBL_SGOLD3;
+			case 'pmb887x':
+				throw new EBLError('EBL is not available for unknown CPU.');
+		}
+	};
+}
 
 export class EBL extends BaseSerialProtocol {
 	private eblInfo?: EBLInfo;
@@ -50,10 +82,13 @@ export class EBL extends BaseSerialProtocol {
 		return BAUDRATES;
 	}
 
-	async connect(options: BSLOptions = {}): Promise<void> {
-		const bootStatus = await loadBootCode(this.port, () => Buffer.from([0x00F020E3, 0xFDFFFFEA]), options);
-		if (!bootStatus.success)
-			throw new EBLError(bootStatus.error);
+	async connect(options: EBLConnectOptions = {}): Promise<void> {
+		if (!options.skipBSL) {
+			const getEBLCode = await loadEBLCode();
+			const bootStatus = await loadBootCode(this.port, ({ cpu }) => getEBLCode(cpu), options);
+			if (!bootStatus.success)
+				throw new EBLError(bootStatus.error);
+		}
 
 		debug("Waiting response from EBL...");
 
@@ -68,47 +103,139 @@ export class EBL extends BaseSerialProtocol {
 		debug(sprintf("EBL: %s %d.%d", name, major, minor));
 
 		this.eblInfo = { mode, major, minor, name };
-		await this.setBaudrate(115200);
 	}
 
-	async setupEBU(flashConfig: EBUFlashConfig[]) {
-		const cmd = Buffer.alloc(88);
-		let offset = 0;
-		offset = cmd.writeUInt32LE(5, offset);
-		offset = cmd.writeUInt32LE(0x04020000, offset);
-		offset = cmd.writeUInt32LE(115200, offset);
-		offset = cmd.writeUInt32LE(2, offset);
-		offset = cmd.writeUInt32LE(1, offset);
-		offset = cmd.writeUInt32LE(0, offset);
+	getInfo() {
+		if (!this.eblInfo)
+			throw new EBLError("Not connected!");
+		return this.eblInfo;
+	}
 
-		for (let i = 0; i < 4; i++) {
-			offset = cmd.writeUInt32LE(flashConfig[i].cs, offset);
-			offset = cmd.writeUInt32LE(flashConfig[i].addrsel, offset);
-			offset = cmd.writeUInt32LE(flashConfig[i].buscon, offset);
-			offset = cmd.writeUInt32LE(flashConfig[i].busap, offset);
-		}
+	async getFlashInfo(buffer?: Buffer): Promise<Buffer> {
+		const response = await this.sendCommand(CMD.CFI_STAGE1, buffer ?? Buffer.from([0, 0]));
+		if (response.length != 0x100)
+			throw new EBLError('Invalid CFI stage 1 response length: %d', response.length);
+		return response;
+	}
 
-		await this.sendCommand(CMD.SET_EBU_CONFIG, cmd);
+	async selectFlashDriver(flashInfo: Buffer): Promise<number> {
+		if (flashInfo.length != 0x100)
+			throw new EBLError('CFI stage 2 requires exactly 0x100 bytes, got %d', flashInfo.length);
 
-		let flashInfo: EBUFLashInfo[] = [];
-		let responseCFI1 = await this.sendCommand(CMD.CFI_STAGE1, Buffer.from([0, 0]));
-		for (let i = 0; i < 4; i++) {
-			const cfiOffset = i * 64;
-			const cfi = responseCFI1.subarray(cfiOffset, cfiOffset + 64);
-			const valid = cfi.readUInt32LE(0) == 1;
-			const vid = cfi.readUInt32LE(4);
-			const pid = cfi.readUInt32LE(8);
-			flashInfo.push({ valid, vid, pid });
-		}
+		const response = await this.sendCommand(CMD.CFI_STAGE2, flashInfo);
+		if (response.length < 2)
+			throw new EBLError('Invalid CFI stage 2 response length: %d', response.length);
+		return response.readUInt16LE(0);
+	}
 
-		return flashInfo;
+	async stopTimeout(): Promise<Buffer> {
+		return await this.sendCommand(CMD.STOP_TIMEOUT);
+	}
+
+	async sendImageHeader(header: Buffer): Promise<number> {
+		if (header.length > 0x800)
+			throw new EBLError('Image header is too large: %d', header.length);
+
+		const response = await this.sendCommand(CMD.IMAGE_HEADER, header);
+		if (response.length < 1)
+			throw new EBLError('Invalid image header response length: %d', response.length);
+		return response[0];
+	}
+
+	async verifyImage(): Promise<number> {
+		const response = await this.sendCommand(CMD.VERIFY_IMAGE);
+		if (response.length < 1)
+			throw new EBLError('Invalid verify image response length: %d', response.length);
+		return response[0];
+	}
+
+	async configureMemory(config: Buffer): Promise<Buffer> {
+		if (config.length != 0x58)
+			throw new EBLError('Memory configuration must be exactly 0x58 bytes, got %d', config.length);
+
+		const response = await this.sendCommand(CMD.SET_EBU_CONFIG, config);
+		if (response.length != 0x14)
+			throw new EBLError('Invalid memory configuration response length: %d', response.length);
+		return response;
+	}
+
+	async setAddress(address: number): Promise<Buffer> {
+		const payload = Buffer.alloc(4);
+		payload.writeUInt32LE(address);
+		const response = await this.sendCommand(CMD.SET_ADDRESS, payload);
+		if (response.length != 6)
+			throw new EBLError('Invalid set address response length: %d', response.length);
+		return response;
+	}
+
+	async readFlash(size: number): Promise<Buffer> {
+		if (!Number.isInteger(size) || size < 1 || size > 0x800)
+			throw new EBLError('Invalid flash read size: %d', size);
+
+		const payload = Buffer.alloc(2);
+		payload.writeUInt16LE(size);
+		const response = await this.sendCommand(CMD.READ, payload);
+		if (response.length != size)
+			throw new EBLError('Invalid flash read response length: %d, expected: %d', response.length, size);
+		return response;
+	}
+
+	async writeFlash(data: Buffer): Promise<number> {
+		if (data.length < 2 || data.length > 0x800 || (data.length & 1) != 0)
+			throw new EBLError('Flash write size must be even and between 2 and 0x800 bytes, got %d', data.length);
+
+		const response = await this.sendCommand(CMD.WRITE, data);
+		if (response.length < 2)
+			throw new EBLError('Invalid flash write response length: %d', response.length);
+		return response.readUInt16LE(0);
+	}
+
+	async eraseFlash(start: number, end: number): Promise<number> {
+		if (end < start)
+			throw new EBLError('Invalid erase range: %08X-%08X', start, end);
+
+		const payload = Buffer.alloc(8);
+		payload.writeUInt32LE(start, 0);
+		payload.writeUInt32LE(end, 4);
+		const response = await this.sendCommand(CMD.ERASE, payload);
+		if (response.length < 2)
+			throw new EBLError('Invalid erase response length: %d', response.length);
+		return response.readUInt16LE(0);
+	}
+
+	async getEraseStatus(): Promise<EBLEraseStatus> {
+		const response = await this.sendCommand(CMD.ERASE_STATUS);
+		if (response.length != 6)
+			throw new EBLError('Invalid erase status response length: %d', response.length);
+
+		return {
+			idle: response[0] != 0,
+			nextAddress: response.readUInt32LE(1),
+			raw: response,
+		};
+	}
+
+	async fillFlash(value: number): Promise<number> {
+		const payload = Buffer.alloc(1);
+		payload.writeUInt8(value);
+		await this.sendPacket(CMD.FILL, payload);
+		const response = await this.recvPacket(CMD.WRITE);
+		if (response.payload.length < 2)
+			throw new EBLError('Invalid flash fill response length: %d', response.payload.length);
+		return response.payload.readUInt16LE(0);
 	}
 
 	async setBaudrate(baudrate: number): Promise<boolean> {
 		const cmd = Buffer.alloc(4);
 		cmd.writeUInt32LE(baudrate);
-		const response = await this.sendCommand(CMD.SET_BAUDRATE, cmd);
-		const receivedBaudrate = response.readUInt32LE(0);
+		await this.sendPacket(CMD.SET_BAUDRATE, cmd);
+		const response = await this.recvPacket([CMD.SET_BAUDRATE, CMD.BAD_BAUDRATE]);
+		if (response.cmd == CMD.BAD_BAUDRATE)
+			return false;
+		if (response.payload.length < 4)
+			throw new EBLError('Invalid set baudrate response length: %d', response.payload.length);
+
+		const receivedBaudrate = response.payload.readUInt32LE(0);
 		if (receivedBaudrate == baudrate) {
 			await this.port.update({ baudRate: baudrate });
 			return true;
@@ -116,12 +243,12 @@ export class EBL extends BaseSerialProtocol {
 		return false;
 	}
 
-	private async sendCommand(cmd: number, payload?: Buffer) {
+	async sendCommand(cmd: number, payload?: Buffer) {
 		await this.sendPacket(cmd, payload);
-		return await this.recvPacket(cmd);
+		return (await this.recvPacket(cmd)).payload;
 	}
 
-	private async sendPacket(cmd: number, payload?: Buffer): Promise<void> {
+	async sendPacket(cmd: number, payload?: Buffer): Promise<void> {
 		const pkt = Buffer.concat([ Buffer.alloc(6), payload ? payload : Buffer.alloc(0), Buffer.alloc(4) ]);
 		const size = (payload?.length ?? 0);
 		pkt.writeUInt16LE(2, 0);
@@ -137,14 +264,15 @@ export class EBL extends BaseSerialProtocol {
 		await this.port.write(pkt);
 	}
 
-	private async recvPacket(fromCmd: number): Promise<Buffer> {
+	async recvPacket(fromCmd: number | number[]): Promise<EBLPacket> {
 		const header = await this.port.readExact(6, 1000);
 		const pktStartToken = header.readUInt16LE(0);
 		const cmd = header.readUInt16LE(2);
 		const size = header.readUInt16LE(4);
 
-		if (fromCmd != cmd)
-			throw new EBLError("Invalid packet cmd=%02X, but expected cmd=%02X", cmd, fromCmd);
+		const expectedCommands = Array.isArray(fromCmd) ? fromCmd : [fromCmd];
+		if (!expectedCommands.includes(cmd))
+			throw new EBLError('Invalid packet cmd=%02X, but expected cmd=%s', cmd, expectedCommands.map(v => sprintf('%02X', v)).join('/'));
 
 		if (pktStartToken != 2)
 			throw new EBLError("Invalid packet, pktStartToken=%02X", pktStartToken);
@@ -163,11 +291,11 @@ export class EBL extends BaseSerialProtocol {
 
 		debug.enabled && debug(sprintf("[RX] %s %s", hexdump(header), hexdump(body)));
 
-		return body.subarray(0, size);
+		return { cmd, payload: body.subarray(0, size) };
 	}
 
 	async disconnect(): Promise<void> {
-		// TODO
+		// Not implemented!
 	}
 
 	private static checksum(cmd: number, data: Buffer) {

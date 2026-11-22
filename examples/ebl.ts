@@ -21,7 +21,7 @@ const argv = parseArgs({
 });
 
 if (argv.values.help || argv.values.usage) {
-	console.log(`USAGE: chaos.js --port /dev/ttyUSB0 --boot ServiceMode`);
+	console.log(`USAGE: ebl.js --port /dev/ttyUSB0`);
 	process.exit(0);
 }
 
@@ -30,6 +30,30 @@ await port.open();
 
 const ebl = new EBL(port);
 await ebl.connect();
+const info = ebl.getInfo();
+console.log(info);
+
+switch (info.mode) {
+	case 0xCC:
+		console.log("Detected secure mode bootloader! (CC)");
+		break;
+	case 0xBB:
+		console.log("Detected default mode bootloader! (BB)");
+		break;
+	default:
+		console.log("Unknown bootloader mode!!!!");
+		break;
+}
+
+// const flashInfo = await ebl.getFlashInfo();
+// console.log(flashInfo);
+
+// await ebl.selectFlashDriver(flashInfo);
+
+await ebl.setAddress(0xA0000000);
+
+const buffer = await ebl.readFlash(0x800);
+console.log(buffer.subarray(0x3C, 0x3C + 4).toString());
 
 await ebl.disconnect();
 await port.close();
