@@ -113,15 +113,12 @@ export class EBL extends BaseSerialProtocol {
 
 	async getFlashInfo(buffer?: Buffer): Promise<Buffer> {
 		const response = await this.sendCommand(CMD.CFI_STAGE1, buffer ?? Buffer.from([0, 0]));
-		if (response.length != 0x100)
+		if (!response.length)
 			throw new EBLError('Invalid CFI stage 1 response length: %d', response.length);
 		return response;
 	}
 
 	async selectFlashDriver(flashInfo: Buffer): Promise<number> {
-		if (flashInfo.length != 0x100)
-			throw new EBLError('CFI stage 2 requires exactly 0x100 bytes, got %d', flashInfo.length);
-
 		const response = await this.sendCommand(CMD.CFI_STAGE2, flashInfo);
 		if (response.length < 2)
 			throw new EBLError('Invalid CFI stage 2 response length: %d', response.length);

@@ -18,8 +18,11 @@ const USB_DEVICES: Record<string, string> = {
 	"04DA:213C": "Softbank 810p",
 	"04DA:2149": "Softbank 820p",
 	"04DA:2159": "Softbank 821p",
+	"04DA:215A": "Softbank 822p",
 	"04DA:2172": "Softbank 830p",
 	"04DA:2173": "Softbank 831p",
+	"04DA:21A4": "Softbank 840p",
+	"04DA:21D0": "Softbank 002p",
 };
 
 export function getUSBDeviceName(vid: number, pid: number): string | undefined {

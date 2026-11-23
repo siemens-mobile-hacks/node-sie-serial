@@ -45,13 +45,15 @@ switch (info.mode) {
 		break;
 }
 
-// const flashInfo = await ebl.getFlashInfo();
-// console.log(flashInfo);
+const flashInfo = await ebl.getFlashInfo();
+console.log(flashInfo);
 
-// await ebl.selectFlashDriver(flashInfo);
+await ebl.selectFlashDriver(flashInfo);
 
+console.log("setAddress");
 await ebl.setAddress(0xA0000000);
 
+console.log("readFlash");
 const buffer = await ebl.readFlash(0x800);
 console.log(buffer.subarray(0x3C, 0x3C + 4).toString());
 
